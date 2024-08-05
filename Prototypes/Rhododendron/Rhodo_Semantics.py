@@ -10,6 +10,7 @@ from keras.layers import Input, Conv2D, DepthwiseConv2D, GlobalAveragePooling2D,
 from keras.models import Model
 from keras.applications import DenseNet121
 from dotenv import load_dotenv
+import datetime
 
 load_dotenv()
 
@@ -18,9 +19,10 @@ IMG_HEIGHT = 244
 IMG_WIDTH = 244
 IMG_CHANNELS = 6
 BATCH_SIZE = 4
-EPOCHS = 100
+EPOCHS = 200
 LEARNING_RATE = 1e-4
-LOG_DIR = os.getenv('LOG_DIR', "./.logs")
+LOG_DIR = os.getenv('LOG_DIR', "./.logs/Rhodo-semantics/" + datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
+)
 
 data_dir = os.getenv('RHODODENDRON-DATASET')
 
