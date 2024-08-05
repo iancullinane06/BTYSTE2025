@@ -4,13 +4,20 @@ import rasterio
 import numpy as np
 from skimage.io import imsave
 from shapely.geometry import box
+from dotenv import load_dotenv
 
-# Paths to your files and directories
-raster_path = r'C:\Users\rough\OneDrive\Desktop\Coding\BTYSTE-2024\Rhododendron\Coillte_Rhododendron_data\Coillte_Multispectral.tif'
-shapefile_path = r'C:\Users\rough\OneDrive\Desktop\Coding\BTYSTE-2024\Rhododendron\Coillte_Rhododendron_data\Rhodo_mapping.shp'
-map_raster_path = r'C:\Users\rough\OneDrive\Desktop\Coding\BTYSTE-2024\Rhododendron\Coillte_Rhododendron_data\Rhodo_label.tif'
-output_image_dir = r"C:\Users\rough\OneDrive\Desktop\Coding\BTYSTE-2024\Rhododendron\output\images"
-output_map_dir = r"C:\Users\rough\OneDrive\Desktop\Coding\BTYSTE-2024\Rhododendron\output\maps"
+load_dotenv()
+
+data_dir = os.getenv('RHODODENDRON-DATASET-PRESPLIT')
+out_dir = os.getenv('RHODODENDRON-DATASET-OUTPUT')
+
+# Paths to my files and directories
+raster_path = os.path.join(data_dir, 'Coillte_Multispectral.tif')
+shapefile_path = os.path.join(data_dir, 'Rhodo_mapping.shp')
+map_raster_path = os.path.join(data_dir, 'Rhodo_label.tif')
+output_image_dir = os.path.join(out_dir, 'images')
+output_map_dir = os.path.join(out_dir, 'maps')
+
 grid_size = 244
 crop_size = 122  # Half of the grid size
 total_images = 0
