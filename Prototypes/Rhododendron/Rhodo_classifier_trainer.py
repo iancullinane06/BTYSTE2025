@@ -16,12 +16,13 @@ load_dotenv()
 IMG_HEIGHT = 244
 IMG_WIDTH = 244
 IMG_CHANNELS = 6
-BATCH_SIZE = 10
+BATCH_SIZE = 16
 EPOCHS = 100
 LEARNING_RATE = 1e-4  # Learning rate variable
-LOG_DIR = os.getenv('LOG_DIR', "./logs")  # Directory to save TensorBoard logs
+LOG_DIR = os.getenv('LOG_DIR', "./.logs")  # Directory to save TensorBoard logs
 
 data_dir = os.getenv('RHODODENDRON-DATASET')
+data_dir = os.path.join(data_dir, "images")
 
 # Custom augmentation function
 def augment_image(image):
