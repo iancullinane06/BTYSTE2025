@@ -5,3 +5,4 @@
 .Models
 .Report_Book
 Application
+.env
