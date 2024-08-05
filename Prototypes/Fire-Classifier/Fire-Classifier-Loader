@@ -14,6 +14,9 @@ from sklearn.model_selection import train_test_split
 import pandas as pd
 import matplotlib.pyplot as plt
 from keras.callbacks import TensorBoard, EarlyStopping, ModelCheckpoint
+from dotenv import load_dotenv
+
+load_dotenv()
 
 # Hyperparameters and settings
 Learning_Rate = 1e-5
@@ -24,9 +27,10 @@ prototype = 5
 num_epochs = 100  # Number of epochs to run
 max_images_per_batch = 32  # Cap on number of images processed per batch
 
-TrainFolder = r"C:\Users\rough\OneDrive\Desktop\Coding\BTYSTE-2024\Datasets\Fire\Training"
-ListImageFolders = os.listdir(TrainFolder)
+data_dir = os.getenv('FIRE-CLASSIFICATION-DATASET')
 
+TrainFolder =  os.path.join(data_dir, "Training")
+ListImageFolders = os.listdir(TrainFolder)
 # Data augmentation settings
 datagen = ImageDataGenerator(
     rescale=1./255,

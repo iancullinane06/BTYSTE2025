@@ -6,23 +6,23 @@ from keras.utils import Sequence
 import tifffile as tiff
 import tensorflow as tf
 from keras import layers, models, optimizers
-from keras.callbacks import Callback, TensorBoard
-from keras.applications import DenseNet121
-from keras.layers import Input
+from keras.layers import Input, Conv2D, DepthwiseConv2D, GlobalAveragePooling2D, BatchNormalization, Activation, UpSampling2D, Reshape, Concatenate, Cropping2D
 from keras.models import Model
-
-# Load environment variables from a .env file
+from keras.applications import DenseNet121
 from dotenv import load_dotenv
+import datetime
+
 load_dotenv()
 
 # Set parameters
 IMG_HEIGHT = 244
 IMG_WIDTH = 244
 IMG_CHANNELS = 6
-BATCH_SIZE = 4  # Smaller batch size might be needed for larger models
-EPOCHS = 100
-LEARNING_RATE = 1e-4  # Learning rate variable
-LOG_DIR = os.getenv('LOG_DIR', "./.logs")  # Directory to save TensorBoard logs
+BATCH_SIZE = 4
+EPOCHS = 200
+LEARNING_RATE = 1e-4
+LOG_DIR = os.getenv('LOG_DIR', "./.logs/Rhodo-semantics/" + datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
+)
 
 data_dir = os.getenv('RHODODENDRON-DATASET')
 
@@ -74,37 +74,57 @@ class TiffDataGenerator(Sequence):
 
     def __data_generation(self, batch_filepaths, batch_masks):
         X = np.empty((self.batch_size, self.img_height, self.img_width, self.img_channels))
-        y = np.empty((self.batch_size, self.img_height, self.img_width, 1))  # Mask with 1 channel
+        y = np.empty((self.batch_size, self.img_height, self.img_width, 1))  # Ensure masks have 1 channel
 
         for i, (filepath, maskpath) in enumerate(zip(batch_filepaths, batch_masks)):
             img = tiff.imread(filepath)
             mask = tiff.imread(maskpath)
             
-            # Resize images if needed
-            if img.shape != (self.img_height, self.img_width, self.img_channels):
-                img = np.resize(img, (self.img_height, self.img_width, self.img_channels))
+            # Ensure the mask has 3 dimensions by adding a channel dimension
+            if mask.ndim == 2:
+                mask = mask[..., np.newaxis]  # Add channel dimension if not present
+
+            # Resize images and masks
+            img = tf.image.resize(img, (self.img_height, self.img_width))
+            mask = tf.image.resize(mask, (self.img_height, self.img_width))
             
-            if mask.shape != (self.img_height, self.img_width):
-                mask = np.resize(mask, (self.img_height, self.img_width))
+            # Convert mask values for binary classification
+            mask = np.where(mask == 2, 1, 0)  # Adjust this according to your mask values
             
             # Normalize the images and masks
-            X[i,] = img / 255.0
-            y[i,] = mask[..., np.newaxis]  # Add channel dimension to mask
+            X[i] = img / 255.0
+            y[i] = mask  # Already added the channel dimension
 
         return X, y
 
 def load_data(data_dir):
     filepaths = []
     masks = []
+
     image_dir = os.path.join(data_dir, "images")
     mask_dir = os.path.join(data_dir, "maps")
 
-    for file in os.listdir(image_dir):
-        if file.endswith('.tif'):
-            filepaths.append(os.path.join(image_dir, file))
-            mask_name = file.replace('.tif', '.tif')  # Assuming masks have similar names
-            masks.append(os.path.join(mask_dir, mask_name))
+    for subdir in ["rhododendron", "non_rhododendron"]:
+        sub_image_dir = os.path.join(image_dir, subdir)
+        sub_mask_dir = os.path.join(mask_dir, subdir)
 
+        if not os.path.exists(sub_image_dir) or not os.path.exists(sub_mask_dir):
+            print(f"Directory {subdir} does not exist in images or maps folder.")
+            continue
+
+        for file in os.listdir(sub_image_dir):
+            if file.endswith('.tif'):
+                img_path = os.path.join(sub_image_dir, file)
+                mask_path = os.path.join(sub_mask_dir, file)
+
+                if os.path.exists(mask_path):
+                    filepaths.append(img_path)
+                    masks.append(mask_path)
+                else:
+                    print(f"Warning: Mask not found for {img_path}")
+
+    print(f"Total images: {len(filepaths)}")
+    print(f"Total masks: {len(masks)}")
     return filepaths, masks
 
 # Load data
@@ -124,145 +144,133 @@ train_generator = TiffDataGenerator(train_filepaths, train_masks, BATCH_SIZE, IM
 validation_generator = TiffDataGenerator(val_filepaths, val_masks, BATCH_SIZE, IMG_HEIGHT, IMG_WIDTH, IMG_CHANNELS, augment=False)
 test_generator = TiffDataGenerator(test_filepaths, test_masks, BATCH_SIZE, IMG_HEIGHT, IMG_WIDTH, IMG_CHANNELS, augment=False)
 
-# Function to create DeepLabV3 model
 def create_deeplabv3_model(input_shape, num_classes=1):
-    base_model = DenseNet121(weights='imagenet', include_top=False, input_shape=input_shape)
-    
-    # Add ASPP and decoder on top of the base model
     inputs = Input(shape=input_shape)
-    x = base_model(inputs, training=False)
 
-    # ASPP
-    b0 = layers.Conv2D(256, (1, 1), padding="same", use_bias=False)(x)
-    b0 = layers.BatchNormalization()(b0)
-    b0 = layers.Activation("relu")(b0)
+    # Initial Conv layer to handle 6 channels
+    x = Conv2D(64, (7, 7), padding="same", use_bias=False)(inputs)
+    x = BatchNormalization()(x)
+    x = Activation("relu")(x)
 
-    b1 = layers.DepthwiseConv2D((3, 3), dilation_rate=1, padding="same", use_bias=False)(x)
-    b1 = layers.BatchNormalization()(b1)
-    b1 = layers.Activation("relu")(b1)
-    b1 = layers.Conv2D(256, (1, 1), padding="same", use_bias=False)(b1)
-    b1 = layers.BatchNormalization()(b1)
-    b1 = layers.Activation("relu")(b1)
+    # Load DenseNet121 without weights and use it as a feature extractor
+    base_model = DenseNet121(weights=None, include_top=False, input_tensor=x)
 
-    b2 = layers.DepthwiseConv2D((3, 3), dilation_rate=2, padding="same", use_bias=False)(x)
-    b2 = layers.BatchNormalization()(b2)
-    b2 = layers.Activation("relu")(b2)
-    b2 = layers.Conv2D(256, (1, 1), padding="same", use_bias=False)(b2)
-    b2 = layers.BatchNormalization()(b2)
-    b2 = layers.Activation("relu")(b2)
+    # ASPP (Atrous Spatial Pyramid Pooling)
+    x = base_model.output
 
-    b3 = layers.DepthwiseConv2D((3, 3), dilation_rate=3, padding="same", use_bias=False)(x)
-    b3 = layers.BatchNormalization()(b3)
-    b3 = layers.Activation("relu")(b3)
-    b3 = layers.Conv2D(256, (1, 1), padding="same", use_bias=False)(b3)
-    b3 = layers.BatchNormalization()(b3)
-    b3 = layers.Activation("relu")(b3)
+    # ASPP branch 0
+    b0 = Conv2D(256, (1, 1), padding="same", use_bias=False)(x)
+    b0 = BatchNormalization()(b0)
+    b0 = Activation("relu")(b0)
 
-    b4 = layers.GlobalAveragePooling2D()(x)
-    b4 = layers.Reshape((1, 1, -1))(b4)
-    b4 = layers.Conv2D(256, (1, 1), padding="same", use_bias=False)(b4)
-    b4 = layers.BatchNormalization()(b4)
-    b4 = layers.Activation("relu")(b4)
-    b4 = layers.UpSampling2D(size=(IMG_HEIGHT // 4, IMG_WIDTH // 4), interpolation="bilinear")(b4)
+    # ASPP branch 1
+    b1 = DepthwiseConv2D((3, 3), dilation_rate=1, padding="same", use_bias=False)(
+        x
+    )
+    b1 = BatchNormalization()(b1)
+    b1 = Activation("relu")(b1)
+    b1 = Conv2D(256, (1, 1), padding="same", use_bias=False)(b1)
+    b1 = BatchNormalization()(b1)
+    b1 = Activation("relu")(b1)
 
-    x = layers.Concatenate()([b4, b0, b1, b2, b3])
-    x = layers.Conv2D(256, (1, 1), padding="same", use_bias=False)(x)
-    x = layers.BatchNormalization()(x)
-    x = layers.Activation("relu")(x)
-    x = layers.UpSampling2D(size=(4, 4), interpolation="bilinear")(x)
+    # ASPP branch 2
+    b2 = DepthwiseConv2D((3, 3), dilation_rate=2, padding="same", use_bias=False)(
+        x
+    )
+    b2 = BatchNormalization()(b2)
+    b2 = Activation("relu")(b2)
+    b2 = Conv2D(256, (1, 1), padding="same", use_bias=False)(b2)
+    b2 = BatchNormalization()(b2)
+    b2 = Activation("relu")(b2)
 
-    outputs = layers.Conv2D(num_classes, (1, 1), activation='sigmoid', padding="same")(x)
+    # ASPP branch 3
+    b3 = DepthwiseConv2D((3, 3), dilation_rate=3, padding="same", use_bias=False)(
+        x
+    )
+    b3 = BatchNormalization()(b3)
+    b3 = Activation("relu")(b3)
+    b3 = Conv2D(256, (1, 1), padding="same", use_bias=False)(b3)
+    b3 = BatchNormalization()(b3)
+    b3 = Activation("relu")(b3)
+
+    # ASPP branch 4
+    b4 = GlobalAveragePooling2D()(x)
+    b4 = Reshape((1, 1, -1))(b4)
+    b4 = Conv2D(256, (1, 1), padding="same", use_bias=False)(b4)
+    b4 = BatchNormalization()(b4)
+    b4 = Activation("relu")(b4)
+    # Resize b4 to match others
+    b4 = UpSampling2D(size=(x.shape[1], x.shape[2]))(b4)
+
+    # Concatenate ASPP branches
+    x = Concatenate(axis=-1)([b0, b1, b2, b3, b4])
+
+    # Final Conv layer
+    x = Conv2D(256, (3, 3), padding="same", use_bias=False)(x)
+    x = BatchNormalization()(x)
+    x = Activation("relu")(x)
+
+    # Calculate necessary scaling factor to upscale to input shape
+    # Compute the required upsampling factor
+    upscale_factor_height = input_shape[0] // x.shape[1]
+    upscale_factor_width = input_shape[1] // x.shape[2]
+
+    # Upsample to the original image size (244x244)
+    x = tf.image.resize(x, (input_shape[0], input_shape[1]), method='bilinear')
+
+    # Output layer with sigmoid activation for binary segmentation
+    outputs = Conv2D(num_classes, (1, 1), activation="sigmoid", padding="same")(x)
 
     model = Model(inputs, outputs)
     return model
 
-# Build the DeepLabV3 model
-model = create_deeplabv3_model((IMG_HEIGHT, IMG_WIDTH, IMG_CHANNELS))
+# Create the model
+model = create_deeplabv3_model((IMG_HEIGHT, IMG_WIDTH, IMG_CHANNELS), num_classes=1)
 
+# Compile the model
 model.compile(optimizer=optimizers.Adam(learning_rate=LEARNING_RATE),
-              loss='mean_squared_error',  # MSE for binary segmentation
+              loss='binary_crossentropy',  # Use binary_crossentropy for binary segmentation
               metrics=['accuracy'])
 
-# Create a custom callback to print weights, biases, and visualize conv layers
-class DebugCallback(Callback):
-    def on_epoch_end(self, epoch, logs=None):
-        # Print weights and biases for each layer
-        print(f"\nEpoch {epoch + 1}/{EPOCHS}")
-        for layer in self.model.layers:
-            weights = layer.get_weights()
-            if weights:
-                print(f"Layer {layer.name} weights shape: {np.shape(weights[0])}")
-                print(f"Layer {layer.name} biases shape: {np.shape(weights[1])}")
+# Setup TensorBoard logging
+tensorboard_callback = tf.keras.callbacks.TensorBoard(log_dir=LOG_DIR, histogram_freq=1)
 
-                # Print weights and biases (truncated for readability)
-                print(f"Layer {layer.name} weights: {weights[0].flatten()[:5]} ...")  # Print first 5 weights
-                print(f"Layer {layer.name} biases: {weights[1].flatten()[:5]} ...")  # Print first 5 biases
-
-# Create TensorBoard callback
-tensorboard_callback = TensorBoard(log_dir=LOG_DIR, histogram_freq=1)
-
-# Train the model with the DebugCallback
+# Train the model
 history = model.fit(
     train_generator,
-    steps_per_epoch=len(train_generator),
-    epochs=EPOCHS,
     validation_data=validation_generator,
-    validation_steps=len(validation_generator),
-    callbacks=[tensorboard_callback, DebugCallback()]  # Add DebugCallback here
+    epochs=EPOCHS,
+    callbacks=[tensorboard_callback]
 )
 
-# Plot training & validation accuracy/loss values
-acc = history.history['accuracy']
-val_acc = history.history['val_accuracy']
-loss = history.history['loss']
-val_loss = history.history['val_loss']
+# Plot training & validation loss/accuracy curves
+def plot_history(history):
+    plt.figure(figsize=(12, 4))
 
-epochs_range = range(EPOCHS)
+    plt.subplot(1, 2, 1)
+    plt.plot(history.history['loss'], label='Train Loss')
+    plt.plot(history.history['val_loss'], label='Validation Loss')
+    plt.title('Loss')
+    plt.xlabel('Epoch')
+    plt.ylabel('Loss')
+    plt.legend()
 
-plt.figure(figsize=(8, 8))
-plt.subplot(1, 2, 1)
-plt.plot(epochs_range, acc, label='Training Accuracy')
-plt.plot(epochs_range, val_acc, label='Validation Accuracy')
-plt.legend(loc='lower right')
-plt.title('Training and Validation Accuracy')
-
-plt.subplot(1, 2, 2)
-plt.plot(epochs_range, loss, label='Training Loss')
-plt.plot(epochs_range, val_loss, label='Validation Loss')
-plt.legend(loc='upper right')
-plt.title('Training and Validation Loss')
-plt.show()
-
-# Evaluate the model
-test_loss, test_accuracy = model.evaluate(test_generator, steps=len(test_generator))
-print(f"Test Loss: {test_loss:.4f}, Test Accuracy: {test_accuracy:.4f}")
-
-# Predict probabilities on the validation set
-val_probs = model.predict(validation_generator, steps=len(validation_generator))
-
-# Plotting some sample outputs for visualization
-def plot_sample_prediction(images, masks, predictions, n=5):
-    plt.figure(figsize=(15, 15))
-    for i in range(n):
-        ax = plt.subplot(3, n, i + 1)
-        plt.imshow(images[i])
-        plt.title("Input Image")
-        plt.axis("off")
-
-        ax = plt.subplot(3, n, i + n + 1)
-        plt.imshow(masks[i].squeeze(), cmap='gray')
-        plt.title("True Mask")
-        plt.axis("off")
-
-        ax = plt.subplot(3, n, i + 2 * n + 1)
-        plt.imshow(predictions[i].squeeze(), cmap='gray')
-        plt.title("Predicted Mask")
-        plt.axis("off")
+    plt.subplot(1, 2, 2)
+    plt.plot(history.history['accuracy'], label='Train Accuracy')
+    plt.plot(history.history['val_accuracy'], label='Validation Accuracy')
+    plt.title('Accuracy')
+    plt.xlabel('Epoch')
+    plt.ylabel('Accuracy')
+    plt.legend()
 
     plt.show()
 
-# Load a small batch to visualize
-sample_images, sample_masks = next(iter(validation_generator))
-sample_predictions = model.predict(sample_images)
+plot_history(history)
 
-plot_sample_prediction(sample_images, sample_masks, sample_predictions, n=3)
+# Evaluate the model
+test_loss, test_acc = model.evaluate(test_generator)
+print(f"Test Loss: {test_loss}")
+print(f"Test Accuracy: {test_acc}")
+
+# Save the model
+model.save(os.path.join(LOG_DIR, 'model.h5'))
