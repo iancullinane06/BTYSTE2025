@@ -8,6 +8,9 @@ import torch.nn as nn
 import torch.optim as optim
 import torchvision.models.segmentation
 import torchvision.transforms as tf
+from dotenv import load_dotenv
+
+load_dotenv()
 
 Learning_Rate = 1e-5
 width = height = 256
@@ -15,7 +18,7 @@ batchSize = 48
 num_classes = 2
 prototype = 5
 
-TrainFolder = r"C:\Users\rough\OneDrive\Desktop\Coding\BTYSTE-2024\Datasets\Forestry\Forest-Segmented\Forest-Segmented"
+TrainFolder = os.getenv('TREE-CLASSIFICATION-DATASET')
 ListImages = os.listdir(os.path.join(TrainFolder, "images"))
 
 # Transformations
