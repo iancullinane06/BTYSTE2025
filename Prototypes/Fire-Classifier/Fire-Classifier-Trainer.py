@@ -7,6 +7,9 @@ from sklearn.metrics import f1_score
 from keras.applications import ResNet50
 from keras.preprocessing.image import img_to_array
 from keras.applications.resnet50 import preprocess_input
+from dotenv import load_dotenv
+
+load_dotenv()
 
 # Hyperparameters and settings
 Learning_Rate = 1e-5
@@ -16,7 +19,8 @@ num_classes = 2
 prototype = 1
 num_batches = 100  # Number of batches to run
 
-TrainFolder = r"C:\Users\rough\OneDrive\Desktop\Coding\BTYSTE-2024\Datasets\Fire\Training"
+data_dir = os.getenv('FIRE-CLASSIFICATION-DATASET')
+TrainFolder = os.path.join(data_dir, "Training")
 ListImageFolders = os.listdir(TrainFolder)
 
 # Transformations
