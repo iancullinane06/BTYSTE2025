@@ -55,7 +55,7 @@ def visualize_segmentation(original_image, segmentation_mask):
 
 if __name__ == "__main__":
     # Load the aerial image
-    image_path = r"C:\Users\rough\OneDrive\Desktop\Coding\BTYSTE-2024\Aerial\Online\River.jpg"
+    image_path = r"" # File name goes here(Old code)
     original_image = cv2.imread(image_path)
 
     # Perform semantic segmentation

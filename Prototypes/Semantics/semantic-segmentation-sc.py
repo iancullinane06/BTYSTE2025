@@ -15,6 +15,10 @@ import torchvision.models as models
 import torchvision.transforms as transforms
 import torchvision
 
+from dotenv import load_dotenv
+
+load_dotenv()
+
 width = height = 2048
 device = torch.device('cpu')
 
@@ -153,7 +157,7 @@ elif int(prot) < 6:
 
 model.load_state_dict(torch.load("Models/Deeplab/DCNN-Prot-" + prot + ".torch"), strict=False)
 
-img_path = r"C:\Users\rough\OneDrive\Desktop\Coding\BTYSTE-2024\Datasets\ADE20K_2021_17_01\images\ADE\training\nature_landscape\boardwalk\ADE_train_00004331.jpg"
+img_path = os.getenv('ADE20K-CLASSIFICATION-TESTIMG')
 
 
 # Define the helper function

@@ -10,6 +10,9 @@ import torch.optim as optim
 import torch.nn.functional as F
 import torchvision.models as models
 import torchvision.transforms as tf
+from dotenv import load_dotenv
+
+load_dotenv()
 
 Learning_Rate = 1e-5
 width = 2048
@@ -113,7 +116,7 @@ class DeepLabV3Plus(nn.Module):
         x = self.decoder(encoder_output)
         return x
     
-TrainFolder = r"C:\Users\rough\OneDrive\Desktop\Coding\BTYSTE-2024\Datasets\ADE20K_2021_17_01\images\ADE\training\nature_landscape"
+TrainFolder =  os.getenv('ADE20K-CLASSIFICATION-DATASET')
 ListCategories = os.listdir(TrainFolder)
 
 # Transformations

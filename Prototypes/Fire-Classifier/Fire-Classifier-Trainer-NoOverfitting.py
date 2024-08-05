@@ -13,6 +13,9 @@ import pandas as pd
 import matplotlib.pyplot as plt
 from keras.callbacks import EarlyStopping, ModelCheckpoint
 import datetime
+from dotenv import load_dotenv
+
+load_dotenv()
 
 # Hyperparameters and settings
 Learning_Rate = 1e-5
@@ -23,8 +26,10 @@ prototype = 5
 num_epochs = 50  # Number of epochs to run
 images_per_epoch = 16  # Total images per epoch (8per class)
 
-TrainFolder = r"C:\Users\rough\OneDrive\Desktop\Coding\BTYSTE-2024\Datasets\Fire\Training"
-TestFolder = r"C:\Users\rough\OneDrive\Desktop\Coding\BTYSTE-2024\Datasets\Fire\Test"
+data_dir = os.getenv('FIRE-CLASSIFICATION-DATASET')
+
+TrainFolder =  os.path.join(data_dir, "Training")
+TestFolder = os.path.join(data_dir, "Test")
 ListImageFolders = os.listdir(TrainFolder)
 
 # Data augmentation settings
