@@ -1,0 +1,238 @@
+import csv
+import os
+import numpy as np
+import cv2
+from PIL import Image
+
+import torch
+import torch.nn as nn
+import torch.optim as optim
+import torch.nn.functional as F
+import torchvision.models as models
+import torchvision.transforms as tf
+
+Learning_Rate = 1e-5
+width = 2048
+height = 2048
+batchSize = 4
+num_classes = 4
+prototype = 14
+
+class Encoder(nn.Module):
+    def __init__(self, in_channels, out_channels, rates):
+        super(Encoder, self).__init__()
+
+        # Global average pooling
+        self.gap = nn.AdaptiveAvgPool2d(1)
+        self.conv1x1_gap = nn.Conv2d(in_channels, out_channels, kernel_size=1)
+
+        # Atrous Spatial Pyramid Pooling
+        self.conv1x1_1 = nn.Conv2d(in_channels, out_channels, kernel_size=1)
+        self.conv3x3_2 = nn.Conv2d(in_channels, out_channels, kernel_size=3, padding=rates[0], dilation=rates[0])
+        self.conv3x3_3 = nn.Conv2d(in_channels, out_channels, kernel_size=3, padding=rates[1], dilation=rates[1])
+        self.conv3x3_4 = nn.Conv2d(in_channels, out_channels, kernel_size=3, padding=rates[2], dilation=rates[2])
+        self.conv3x3_5 = nn.Conv2d(in_channels, out_channels, kernel_size=3, padding=rates[3], dilation=rates[3])
+        self.pooling = nn.Sequential(
+            nn.AdaptiveAvgPool2d(1),
+            nn.Conv2d(in_channels, out_channels, kernel_size=1)
+        )
+        # Concatenation layer
+        self.conv1x1_out = nn.Conv2d(out_channels * 5, out_channels, kernel_size=1)
+
+    def forward(self, x):
+        # Global average pooling
+        gap = self.gap(x)
+        gap = self.conv1x1_gap(gap)
+        gap = F.interpolate(gap, size=x.size()[2:], mode='bilinear', align_corners=False)
+
+        # Atrous Spatial Pyramid Pooling
+        conv1x1_1 = self.conv1x1_1(x)
+        conv3x3_2 = self.conv3x3_2(x)
+        conv3x3_3 = self.conv3x3_3(x)
+        conv3x3_4 = self.conv3x3_4(x)
+        conv3x3_5 = self.conv3x3_5(x)
+        pooled = self.pooling(x)
+        pooled = F.interpolate(pooled, size=x.size()[2:], mode='bilinear', align_corners=False)
+
+        # Concatenation
+        Encoder_out = torch.cat([gap, conv1x1_1, conv3x3_2, conv3x3_3, conv3x3_4, conv3x3_5, pooled], dim=1)
+
+        return Encoder_out
+
+class Decoder(nn.Module):
+    def __init__(self, in_channels, mid_channels, out_channels):
+        super(Decoder, self).__init__()
+
+        # 1x1 convolution to adjust the number of channels
+        self.conv1x1 = nn.Conv2d(in_channels, mid_channels, kernel_size=1)
+
+        # 3x3 convolution
+        self.conv3x3 = nn.Conv2d(mid_channels, num_classes, kernel_size=3, padding=1)
+
+        # Upsample by 4
+        self.upsample4 = nn.Upsample(scale_factor=4, mode='bilinear', align_corners=False)
+
+        # Final 1x1 convolution
+        self.final_conv1x1 = nn.Conv2d(mid_channels, out_channels, kernel_size=1)
+
+    def forward(self, x, encoder_output):
+        # 1x1 convolution
+        x = self.conv1x1(x)
+
+        # Concatenate with the encoder output
+        x_concatenated = torch.cat([x, encoder_output], dim=1)
+
+        # 3x3 convolution
+        x = self.conv3x3(x_concatenated)
+
+        # Final 1x1 convolution
+        x = self.final_conv1x1(x)
+
+        # Upsample by 4 again
+        x = self.upsample4(x)
+
+        return x
+
+class DeepLabV3Plus(nn.Module):
+    def __init__(self, num_classes):
+        super(DeepLabV3Plus, self).__init__()
+        self.backbone = models.resnet101(pretrained=False)
+        self.encoder = Encoder(in_channels=2048, out_channels=num_classes, rates=[6, 12, 18, 24])
+        self.decoder = Decoder(in_channels=num_classes * 5, mid_channels=32, out_channels=num_classes)
+
+    def forward(self, x):
+        x = self.backbone.conv1(x)
+        x = self.backbone.bn1(x)
+        x = self.backbone.relu(x)
+        x = self.backbone.maxpool(x)
+        x = self.backbone.layer1(x)
+        x = self.backbone.layer2(x)
+        x = self.backbone.layer3(x)
+        x = self.backbone.layer4(x)
+        encoder_output = self.encoder(x)
+        x = self.decoder(encoder_output)
+        return x
+    
+TrainFolder = r"C:\Users\rough\OneDrive\Desktop\Coding\BTYSTE-2024\Datasets\ADE20K_2021_17_01\images\ADE\training\nature_landscape"
+ListCategories = os.listdir(TrainFolder)
+
+# Transformations
+transformImg = tf.Compose([
+    tf.transforms.RandomCrop(height, padding=None, pad_if_needed=True, fill=0, padding_mode='constant'),
+    tf.ToTensor(),
+    tf.Normalize((0.485, 0.456, 0.406), (0.229, 0.224, 0.225))
+])
+
+transformAnnotation = tf.Compose([
+    tf.transforms.RandomCrop(height, padding=None, pad_if_needed=True, fill=0, padding_mode='constant'),
+    tf.ToTensor()
+])
+
+
+# Read random image
+def ReadRandomImage():
+    # Select a random category
+    category = np.random.choice(ListCategories)
+    
+    # Get the list of images within the current category
+    ListImages = os.listdir(os.path.join(TrainFolder, category))
+    img_name = np.random.choice(ListImages)
+    
+    Img = cv2.imread(os.path.join(TrainFolder, category, img_name))
+    
+    # Assuming segmentation masks have the same name as images with '.png' extension
+    mask_name = img_name.replace(".jpg", "_seg.png")
+    mask_path = os.path.join(TrainFolder, category, mask_name)
+    
+    # Load the mask
+    mask = cv2.imread(mask_path, cv2.IMREAD_UNCHANGED)
+    
+    if Img is not None and mask is not None:
+
+        # Convert NumPy arrays to PIL Images
+        Img_pil = Image.fromarray((Img * 255).astype(np.uint8))  # Assuming the image values are in the range [0, 1]
+        mask_pil = Image.fromarray((mask * 255).astype(np.uint8))  # Assuming the mask values are in the range [0, 1]
+
+        # Transform the images
+        Img = transformImg(Img_pil)
+        mask = transformAnnotation(mask_pil)
+        
+        return Img, mask
+    else:
+        # Retry by calling itself recursively until a valid image and mask are obtained
+        return ReadRandomImage()
+
+# Load batch of images
+def LoadBatch():
+    images = torch.zeros([batchSize, 3, height, width])
+    annotation = torch.zeros([batchSize, 3, height, width], dtype=torch.float32)  # Ensure the data type is float32
+    for i in range(batchSize):
+        img, mask = ReadRandomImage()
+
+        # Convert data types back to expected types
+        img = img.numpy()  # Convert PyTorch tensor to NumPy array
+        mask = mask.numpy()  # Convert PyTorch tensor to NumPy array
+
+        images[i] = torch.from_numpy(img)
+        # Assign the mask directly to the corresponding chaannotationels of annotation
+        annotation[i] = torch.from_numpy(mask)
+
+    return images, annotation
+
+
+# Load and set model and optimizer
+device = torch.device('cpu')
+model = DeepLabV3Plus(num_classes=num_classes).train()
+model = model.to(device)
+
+# Modify the last layer in the decoder
+model.decoder.conv1x1 = nn.Conv2d(height, num_classes, kernel_size=1)
+model.decoder.final_conv1x1 = nn.Conv2d(batchSize, num_classes, kernel_size=1)
+
+
+optimizer = optim.Adam(params=model.parameters(), lr=Learning_Rate)
+
+# Train
+unique_labels = set()  # Initialize an empty set to store unique labels
+
+for epoch in range(1000):
+    images, annotation = LoadBatch()
+    images = torch.autograd.Variable(images, requires_grad=False).to(device)
+    annotation = torch.autograd.Variable(annotation, requires_grad=False).to(device)
+    Pred = model(images)
+    
+    model.zero_grad()
+    criterion = nn.CrossEntropyLoss()
+    
+    # Modify the target tensor to convert it into a single-channotationel tensor
+    annotation_labels = torch.argmax(annotation, dim=1)  # Extract labels by selecting the channnel with maximum value
+    resized_target = F.interpolate(annotation_labels.unsqueeze(1).float(), size=(256, 256), mode='nearest').squeeze(1).long()
+    
+    Loss = criterion(Pred, resized_target.long())
+    Loss.backward()
+    optimizer.step()
+    
+    seg = torch.argmax(Pred[0], 0).cpu().detach().numpy()
+    print(epoch, ") Loss=", Loss.data.cpu().numpy())
+    
+    # Save loss to CSV
+    with open("data/DCNN-Prot-" + str(prototype) + ".csv", "a", newline="") as file:
+        db = csv.writer(file)
+        loss = [Loss.item()]
+        db.writerow(loss)
+    
+    if epoch % 10 == 0:
+        # Save model weights every 10 epochs
+        print("Saving Model: Models/Deeplab/DCNN-Prot-" + str(prototype) + ".torch")
+        torch.save(model.state_dict(), "Models/Deeplab/DCNN-Prot-" + str(prototype) + ".torch")
+        
+        # Collect unique labels from the segmentation masks
+        for i in range(batchSize):
+            unique_labels.update(seg[i].flatten())
+        
+        # Save unique labels to a file in the "labels" folder
+        labels_folder = "Labels"
+        labels_file_path = os.path.join(labels_folder, "labels-prot-" + str(prototype) + ".txt")
+        with open(labels_file_path, "w") as labels_file:
+            for label in unique_labels:
+                labels_file.write(f"{label}\n")

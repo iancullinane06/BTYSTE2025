@@ -1,0 +1,88 @@
+import csv
+import os
+import numpy as np
+import cv2
+
+import torch
+import torch.nn as nn
+import torch.optim as optim
+import torchvision.models.segmentation
+import torchvision.transforms as tf
+
+
+Learning_Rate = 1e-3
+width = height = 256
+batchSize = 48
+num_classes = 2
+prototype = 5
+
+TrainFolder = r"C:\Users\rough\OneDrive\Desktop\Coding\BTYSTE-2024\Datasets\Forestry\Forest-Segmented\Forest-Segmented"
+ListImages = os.listdir(os.path.join(TrainFolder, "images"))
+
+# Transformations
+transformImg = tf.Compose([
+    tf.ToPILImage(),
+    tf.Resize((height, width)),
+    tf.ToTensor(),
+    tf.Normalize((0.485, 0.456, 0.406), (0.229, 0.224, 0.225))
+])
+
+transformAnn = tf.Compose([
+    tf.ToPILImage(),
+    tf.Resize((height, width), interpolation=tf.InterpolationMode.NEAREST),
+    tf.ToTensor()
+])
+
+# Read random image
+def ReadRandomImage():
+    idx = np.random.randint(0, len(ListImages))
+    Img = cv2.imread(os.path.join(TrainFolder, "images", ListImages[idx]))[:, :, 0:3]
+    forestry = cv2.imread(os.path.join(TrainFolder, "masks", ListImages[idx].replace("sat", "mask")), 0)
+    AnnMap = np.zeros(Img.shape[0:2], np.float32)
+    if forestry is not None:
+        AnnMap[forestry == 1] = 1
+    Img = transformImg(Img)
+    AnnMap = transformAnn(AnnMap)
+    return Img, AnnMap
+
+# Load batch of images
+def LoadBatch():
+    images = torch.zeros([batchSize, 3, height, width])
+    ann = torch.zeros([batchSize, height, width])
+    for i in range(batchSize):
+        images[i], ann[i] = ReadRandomImage()
+    return images, ann
+
+# Load and set model and optimizer
+device = torch.device('cpu')
+model = torchvision.models.segmentation.deeplabv3_resnet101(pretrained=0, progress=1, num_classes=2).train()
+model.classifier[4] = nn.Conv2d(256, num_classes, kernel_size=(1, 1), stride=(1, 1))
+model = model.to(device)
+optimizer = optim.Adam(params=model.parameters(), lr=Learning_Rate)
+
+# Train
+for epoch in range(1000):
+    images, ann = LoadBatch()
+    images = torch.autograd.Variable(images, requires_grad=False).to(device)
+    ann = torch.autograd.Variable(ann, requires_grad=False).to(device)
+    Pred = model(images)['out']
+    
+    model.zero_grad()
+    criterion = nn.CrossEntropyLoss()
+    Loss = criterion(Pred, ann.long())
+    Loss.backward()
+    optimizer.step()
+    
+    seg = torch.argmax(Pred[0], 0).cpu().detach().numpy()
+    print(epoch, ") Loss=", Loss.data.cpu().numpy())
+    
+    # Save loss to CSV
+    with open("data/DCNN-Prot-" + str(prototype) + ".csv", "a", newline="") as file:
+        db = csv.writer(file)
+        loss = [Loss.item()]
+        db.writerow(loss)
+    
+    if epoch % 10 == 0:
+        # Save model weights every 10 epochs
+        print("Saving Model: Models/DCNN-Prot-" + str(prototype) + ".torch")
+        torch.save(model.state_dict(), "Models/DCNN-Prot-" + str(prototype) + ".torch")

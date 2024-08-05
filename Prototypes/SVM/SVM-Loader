@@ -1,0 +1,94 @@
+import cv2
+import numpy as np
+from joblib import load
+
+
+def preprocess_images(image_path):
+    # Read the image
+    image = cv2.imread(image_path)
+
+    # Check if the image is loaded successfully
+    if image is None:
+        print(f"Error loading image: {image_path}")
+        return None
+
+    # Define a threshold for off-white color
+    lower_white = np.array([200, 200, 200], dtype=np.uint8)
+    upper_white = np.array([255, 255, 255], dtype=np.uint8)
+
+    # Create a mask to identify off-white pixels
+    mask_white = cv2.inRange(image, lower_white, upper_white)
+
+    # Invert the mask to keep non-off-white pixels
+    mask_colored = cv2.bitwise_not(mask_white)
+
+    # Bitwise AND operation to keep only the colored pixels
+    result = cv2.bitwise_and(image, image, mask=mask_colored)
+
+    # Convert the result to grayscale
+    gray_result = cv2.cvtColor(result, cv2.COLOR_BGR2GRAY)
+
+    # Find contours in the grayscale result
+    contours, _ = cv2.findContours(gray_result, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+
+    # Create a mask for the region of interest
+    mask = np.zeros_like(gray_result)
+
+    # Draw the contours on the mask
+    cv2.drawContours(mask, contours, -1, (255), thickness=cv2.FILLED)
+
+    # Bitwise AND operation to get the final result
+    final_result = cv2.bitwise_and(result, result, mask=mask)
+
+    return final_result
+
+# Feature Extraction
+def extract_features(image):
+    # Convert the image to HSV color space
+    hsv = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)
+
+    # Calculate the color histograms for each channel (Hue, Saturation, Value)
+    hist_hue = cv2.calcHist([hsv], [0], None, [256], [0, 256])
+    hist_saturation = cv2.calcHist([hsv], [1], None, [256], [0, 256])
+    hist_value = cv2.calcHist([hsv], [2], None, [256], [0, 256])
+
+    # Normalize the histograms
+    hist_hue /= hist_hue.sum() + 1e-7
+    hist_saturation /= hist_saturation.sum() + 1e-7
+    hist_value /= hist_value.sum() + 1e-7
+
+    
+    # Calculate additional image statistics
+    mean_color = np.mean(image, axis=(0, 1))
+    std_color = np.std(image, axis=(0, 1))
+
+    # Concatenate the histograms and additional statistics to create the feature vector
+    features = np.concatenate((hist_hue.flatten(), hist_saturation.flatten(), hist_value.flatten(),
+                               mean_color, std_color))
+
+    return features
+
+# Load an image and apply preprocessing and feature extraction
+image_path = r"C:\Users\rough\OneDrive\Desktop\Coding\BTYSTE-2024\Aerial\Online\ash.jpg"
+loaded_image = preprocess_images(image_path)
+
+if loaded_image is not None:
+    extracted_features = extract_features(loaded_image)
+else:
+    print("Image loading and preprocessing failed.")
+
+prot = input("Which model would you like to load?:")
+# Load the saved SVM model
+model_filename = f"Models/SVM/svm-model-prot-{prot}.joblib"
+svm_model = load(model_filename)
+
+# Assuming you have a new data point (feature vector) for prediction
+new_data_point = np.array([extracted_features])
+
+# Make predictions using the loaded model
+flat_data_point = new_data_point.flatten()
+
+# Make predictions using the loaded model
+prediction = svm_model.predict([flat_data_point])
+
+print(f"The predicted label for the new data point is: {prediction}")

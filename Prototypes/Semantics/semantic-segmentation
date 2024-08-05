@@ -1,0 +1,65 @@
+#pip install opencv-python
+import cv2
+import numpy as np
+import torch
+import torchvision.transforms as transforms
+from torchvision import models
+from torchvision.models.segmentation import deeplabv3_resnet101
+
+from torchvision import models
+
+
+def preprocess_image(image_path):
+    img = cv2.imread(image_path)
+    img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+    img = transforms.ToPILImage()(img)
+
+    img = transforms.ToTensor()(img)
+    img = transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])(img)
+    img = img.unsqueeze(0)
+    return img
+
+def semantic_segmentation(image_path):
+    img = preprocess_image(image_path)
+    
+    # Load the pre-trained DeepLabV3 model with ResNet101 backbone
+    fcn = models.segmentation.fcn_resnet101(pretrained=True).eval()
+
+    # Get the segmentation mask
+    with torch.no_grad():
+        output = fcn(img)['out'][0]
+        print(output.shape)
+
+    mask = torch.argmax(output.squeeze(), dim=0).detach().cpu().numpy()
+    print (mask.shape)
+    print (np.unique(mask))
+
+    return mask
+
+def visualize_segmentation(original_image, segmentation_mask):
+    # Convert the 16-bit segmentation mask to 8-bit
+    segmentation_mask_8bit = cv2.convertScaleAbs(segmentation_mask)
+    original_image_8bit = cv2.convertScaleAbs(original_image)
+
+    # Apply the color map to the 8-bit mask
+    colorized_mask = cv2.applyColorMap(segmentation_mask_8bit, cv2.COLORMAP_JET)
+
+    # Visualize the segmentation mask on the original image
+    blended_image = cv2.addWeighted(original_image_8bit, 0.7, colorized_mask, 0.3, 0)
+
+    cv2.imshow('Original Image', original_image)
+    cv2.imshow('Segmentation Mask', blended_image)
+    cv2.waitKey(0)
+    cv2.destroyAllWindows()
+
+
+if __name__ == "__main__":
+    # Load the aerial image
+    image_path = r"C:\Users\rough\OneDrive\Desktop\Coding\BTYSTE-2024\Aerial\Online\River.jpg"
+    original_image = cv2.imread(image_path)
+
+    # Perform semantic segmentation
+    segmentation_mask = semantic_segmentation(image_path)
+
+    # Visualize the results
+    visualize_segmentation(original_image, segmentation_mask)
