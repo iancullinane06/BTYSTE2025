@@ -5,7 +5,13 @@ import numpy as np
 from skimage.io import imsave
 from shapely.geometry import box
 from dotenv import load_dotenv
+from tkinter import Tk, Label, Frame
+from tkinter import ttk
+from PIL import Image, ImageTk
+import threading
+import queue
 
+# Load environment variables
 load_dotenv()
 
 data_dir = os.getenv('RHODODENDRON-DATASET-PRESPLIT')
@@ -33,154 +39,294 @@ os.makedirs(os.path.join(output_map_dir, 'rhododendron'), exist_ok=True)
 os.makedirs(os.path.join(output_map_dir, 'non_rhododendron'), exist_ok=True)
 
 # Load the shapefile
-gdf = gpd.read_file(shapefile_path)
+def load_shapefile():
+    global gdf, crs
+    try:
+        with rasterio.open(raster_path) as src:
+            crs = src.crs  # Get CRS from raster
 
-# Load the map raster
-with rasterio.open(map_raster_path) as map_src:
-    map_data = map_src.read(1)  # Assuming single band raster
+        gdf = gpd.read_file(shapefile_path)
+        gdf = gdf.to_crs(crs)  # Ensure CRS match
+        print(f"Successfully loaded shapefile with {len(gdf)} features.")
+    except Exception as e:
+        print(f"Error reading the shapefile: {e}")
+        raise
 
-# Open the raster image for reading
-with rasterio.open(raster_path) as src:
-    transform = src.transform
-    crs = src.crs
+# Function to display channels using Tkinter
+def display_channels(cell_image, frame, image_count):
+    global label_rgb, labels
+    
+    # Merge the first three channels into an RGB image
+    red_channel = cell_image[0]
+    green_channel = cell_image[1]
+    blue_channel = cell_image[2]
+    
+    rgb_image = np.stack((red_channel, green_channel, blue_channel), axis=-1)
+    
+    # Check if the image is an artifact (only 0 and 255 values)
+    is_artifact = np.all((rgb_image == 0) | (rgb_image == 255))
+    
+    # If artifact, set background to grey
+    if is_artifact:
+        frame.configure(bg='grey')
+        rgb_image[:, :, :] = 128  # Set all values to grey
+    else:
+        frame.configure(bg='white')
+    
+    # Convert to PIL Image and Tkinter-compatible format
+    rgb_image_pil = Image.fromarray(rgb_image, 'RGB')
+    rgb_imgtk = ImageTk.PhotoImage(image=rgb_image_pil)
+    
+    # Update Tkinter labels
+    label_rgb.config(image=rgb_imgtk)
+    label_rgb.image = rgb_imgtk  # Keep a reference to avoid garbage collection
+    
+    # Normalize and prepare the remaining channels
+    channels = []
+    for channel_index in range(3, 6):
+        channel_data = cell_image[channel_index]
+        channel_min = channel_data.min()
+        channel_max = channel_data.max()
+        if channel_min != channel_max:
+            normalized_channel = (channel_data - channel_min) / (channel_max - channel_min) * 255
+        else:
+            normalized_channel = np.zeros_like(channel_data)  # Handle channels with no variation
+        normalized_channel = np.clip(normalized_channel, 0, 255).astype(np.uint8)
+        channels.append(normalized_channel)
 
-    # Check if the raster image is blank
-    raster = src.read()
-    if np.all((raster == 0) | (raster == 1)):
-        print("The raster image contains only min and max values (0 and 1).")
-        exit()
+    # Convert arrays to PIL images
+    channel_images_pil = [Image.fromarray(ch, 'L') for ch in channels]
 
-    # Define the bounding box of the raster
-    raster_bounds = src.bounds
-    raster_width = src.width
-    raster_height = src.height
+    # Convert images to Tkinter-compatible format
+    channel_imgtk = [ImageTk.PhotoImage(image=ch) for ch in channel_images_pil]
 
-    # Convert shapefile to the raster CRS
-    gdf = gdf.to_crs(crs)
+    # Update the labels with new images
+    if image_count % 5 == 0:  # Update every 5 images
+        for idx, img in enumerate(channel_imgtk):
+            labels[idx].config(image=img)
+            labels[idx].image = img  # Keep a reference to avoid garbage collection
 
-    # Process the entire grid normally
-    for i in range(0, raster_width, grid_size):
-        for j in range(0, raster_height, grid_size):
-            # Define the grid cell boundaries
-            minx = raster_bounds.left + i * transform[0]
-            maxx = minx + grid_size * transform[0]
-            maxy = raster_bounds.top - j * abs(transform[4])
-            miny = maxy - grid_size * abs(transform[4])
+        # Update the display
+        root.update_idletasks()
 
-            cell_bounds = box(minx, miny, maxx, maxy)
-            cell_center = cell_bounds.centroid
+# Function to process images
+def process_images():
+    global total_images, rhododendron_images, non_rhododendron_images
 
-            # Extract the grid cell image
-            window = rasterio.windows.Window(i, j, grid_size, grid_size)
-            cell_image = src.read(window=window)
+    try:
+        with rasterio.open(raster_path) as src:
+            crs = src.crs  # Ensure CRS is captured
+            transform = src.transform
+            raster = src.read()
+            num_channels, raster_height, raster_width = raster.shape
+            print(f"Raster has {num_channels} channels, dimensions: {raster_width}x{raster_height}")
 
-            # Check if the cell image contains only min and max values
-            if np.all((cell_image == 0) | (cell_image == 1)):
-                continue  # Skip cells with only min and max values
+            # Load the map raster
+            with rasterio.open(map_raster_path) as map_src:
+                global map_data
+                map_data = map_src.read(1)  # Assuming single band raster
 
-            # Normalize the cell image if it has a valid range
-            cell_min = cell_image.min()
-            cell_max = cell_image.max()
-            if cell_min != cell_max:
-                cell_image = (cell_image - cell_min) / (cell_max - cell_min) * 255
-                cell_image = cell_image.astype(np.uint8)
-            else:
-                continue  # Skip images with no variation
+            # Define the bounding box of the raster
+            raster_bounds = src.bounds
 
-            # Check for rhododendron presence
-            intersects = gdf.intersects(cell_bounds).any()
-            class_label = "rhododendron" if intersects else "non_rhododendron"
-            output_subdir = os.path.join(output_image_dir, class_label)
-            map_output_subdir = os.path.join(output_map_dir, class_label)
-            file_name = f"{i}_{j}.tif"
-            
-            if intersects:
-                rhododendron_images += 1
-            else:
-                non_rhododendron_images += 1
+            # Process the entire grid normally
+            image_count = 0
+            for i in range(0, raster_width, grid_size):
+                for j in range(0, raster_height, grid_size):
+                    # Define the grid cell boundaries
+                    minx = raster_bounds.left + i * transform[0]
+                    maxx = minx + grid_size * transform[0]
+                    maxy = raster_bounds.top - j * abs(transform[4])
+                    miny = maxy - grid_size * abs(transform[4])
 
-            # Save the image
-            output_path = os.path.join(output_subdir, file_name)
-            print(f"Saving image to: {output_path}")  # Debug print
-            transposed_image = cell_image.transpose(1, 2, 0)
-            imsave(output_path, transposed_image, plugin="tifffile", photometric='minisblack', planarconfig='contig')
+                    cell_bounds = box(minx, miny, maxx, maxy)
 
-            # Save the corresponding map
-            map_output_path = os.path.join(map_output_subdir, file_name)
-            print(f"Saving map to: {map_output_path}")  # Debug print
-            map_cell = map_data[j:j+grid_size, i:i+grid_size]
-            imsave(map_output_path, map_cell, plugin="tifffile", photometric='minisblack', planarconfig='contig')
-            
-            total_images += 1
+                    # Extract the grid cell image
+                    window = rasterio.windows.Window(i, j, grid_size, grid_size)
+                    cell_image = src.read(window=window)
 
-    # Crop the entire image
-    crop_window = rasterio.windows.Window(crop_size, crop_size, raster_width - 2*crop_size, raster_height - 2*crop_size)
-    cropped_raster = src.read(window=crop_window)
+                    # Check if the cell image contains only min and max values
+                    is_artifact = np.all((cell_image == 0) | (cell_image == 255))
+                    if is_artifact:
+                        # Do not save the image if it's an artifact
+                        cell_image = np.full_like(cell_image, 128, dtype=np.uint8)
+                    
+                    # Normalize each channel separately if it has a valid range
+                    for channel in range(cell_image.shape[0]):
+                        cell_min = cell_image[channel].min()
+                        cell_max = cell_image[channel].max()
+                        if cell_min != cell_max:
+                            cell_image[channel] = (cell_image[channel] - cell_min) / (cell_max - cell_min) * 255
+                        else:
+                            cell_image[channel] = np.zeros_like(cell_image[channel])
 
-    # Define new raster bounds after cropping
-    cropped_minx = raster_bounds.left + crop_size * transform[0]
-    cropped_maxx = cropped_minx + (raster_width - 2*crop_size) * transform[0]
-    cropped_maxy = raster_bounds.top - crop_size * abs(transform[4])
-    cropped_miny = cropped_maxy - (raster_height - 2*crop_size) * abs(transform[4])
+                    cell_image = np.clip(cell_image, 0, 255).astype(np.uint8)
 
-    cropped_raster_bounds = (cropped_minx, cropped_miny, cropped_maxx, cropped_maxy)
+                    # Display the current cell image channels
+                    display_channels(cell_image, frame, image_count)
 
-    # Re-divide the cropped image into grid cells
-    for i in range(0, raster_width - 2*crop_size, grid_size):
-        for j in range(0, raster_height - 2*crop_size, grid_size):
-            # Define the grid cell boundaries
-            minx = cropped_raster_bounds[0] + i * transform[0]
-            maxx = minx + grid_size * transform[0]
-            maxy = cropped_raster_bounds[3] - j * abs(transform[4])
-            miny = maxy - grid_size * abs(transform[4])
+                    # Check for rhododendron presence
+                    intersects = gdf.intersects(cell_bounds).any()
+                    class_label = "rhododendron" if intersects else "non_rhododendron"
+                    
+                    # Print debugging information
+                    print(f"Cell bounds: {cell_bounds}")
+                    print(f"Intersection check: {'rhododendron' if intersects else 'non_rhododendron'}")
 
-            cell_bounds = box(minx, miny, maxx, maxy)
-            cell_center = cell_bounds.centroid
+                    # Save the image if it's not an artifact
+                    if not np.all((cell_image == 128)):
+                        output_subdir = os.path.join(output_image_dir, class_label)
+                        map_output_subdir = os.path.join(output_map_dir, class_label)
+                        file_name = f"{i}_{j}.tif"
 
-            # Extract the grid cell image from the cropped raster
-            window = rasterio.windows.Window(crop_size + i, crop_size + j, grid_size, grid_size)
-            cell_image = cropped_raster[:, j:j+grid_size, i:i+grid_size]
+                        if intersects:
+                            rhododendron_images += 1
+                        else:
+                            non_rhododendron_images += 1
 
-            # Check if the cell image contains only min and max values
-            if np.all((cell_image == 0) | (cell_image == 1)):
-                continue  # Skip cells with only min and max values
+                        # Save the image
+                        output_path = os.path.join(output_subdir, file_name)
+                        print(f"Saving image to: {output_path}")  # Debug print
+                        transposed_image = cell_image.transpose(1, 2, 0)
+                        imsave(output_path, transposed_image, plugin="tifffile", photometric='minisblack', planarconfig='contig')
 
-            # Normalize the cell image if it has a valid range
-            cell_min = cell_image.min()
-            cell_max = cell_image.max()
-            if cell_min != cell_max:
-                cell_image = (cell_image - cell_min) / (cell_max - cell_min) * 255
-                cell_image = cell_image.astype(np.uint8)
-            else:
-                continue  # Skip images with no variation
+                        # Save the corresponding map
+                        map_output_path = os.path.join(map_output_subdir, file_name)
+                        print(f"Saving map to: {map_output_path}")  # Debug print
+                        map_cell = map_data[j:j+grid_size, i:i+grid_size]
+                        imsave(map_output_path, map_cell, plugin="tifffile", photometric='minisblack', planarconfig='contig')
 
-            # Check for rhododendron presence
-            intersects = gdf.intersects(cell_bounds).any()
-            class_label = "rhododendron" if intersects else "non_rhododendron"
-            output_subdir = os.path.join(output_image_dir, class_label)
-            map_output_subdir = os.path.join(output_map_dir, class_label)
-            file_name = f"cropped_{i}_{j}.tif"
-            
-            if intersects:
-                rhododendron_images += 1
-            else:
-                non_rhododendron_images += 1
+                    total_images += 1
+                    image_count += 1
 
-            # Save the image
-            output_path = os.path.join(output_subdir, file_name)
-            print(f"Saving cropped image to: {output_path}")  # Debug print
-            transposed_image = cell_image.transpose(1, 2, 0)
-            imsave(output_path, transposed_image, plugin="tifffile", photometric='minisblack', planarconfig='contig')
+            # Crop the entire image
+            crop_window = rasterio.windows.Window(crop_size, crop_size, raster_width - 2*crop_size, raster_height - 2*crop_size)
+            cropped_raster = src.read(window=crop_window)
 
-            # Save the corresponding map
-            map_output_path = os.path.join(map_output_subdir, file_name)
-            print(f"Saving cropped map to: {map_output_path}")  # Debug print
-            map_cell = map_data[crop_size + j:crop_size + j + grid_size, crop_size + i:crop_size + i + grid_size]
-            imsave(map_output_path, map_cell, plugin="tifffile", photometric='minisblack', planarconfig='contig')
-            
-            total_images += 1
+            # Define new raster bounds after cropping
+            cropped_minx = raster_bounds.left + crop_size * transform[0]
+            cropped_maxx = cropped_minx + (raster_width - 2*crop_size) * transform[0]
+            cropped_maxy = raster_bounds.top - crop_size * abs(transform[4])
+            cropped_miny = cropped_maxy - (raster_height - 2*crop_size) * abs(transform[4])
 
-print("Processing complete.")
-print(f"Total images: {total_images}")
-print(f"Rhododendron images: {rhododendron_images}")
-print(f"Non-rhododendron images: {non_rhododendron_images}")
+            cropped_raster_bounds = (cropped_minx, cropped_miny, cropped_maxx, cropped_maxy)
+
+            # Re-divide the cropped image into grid cells
+            for i in range(0, raster_width - 2*crop_size, grid_size):
+                for j in range(0, raster_height - 2*crop_size, grid_size):
+                    # Define the grid cell boundaries
+                    minx = cropped_raster_bounds[0] + i * transform[0]
+                    maxx = minx + grid_size * transform[0]
+                    maxy = cropped_raster_bounds[3] - j * abs(transform[4])
+                    miny = maxy - grid_size * abs(transform[4])
+
+                    cell_bounds = box(minx, miny, maxx, miny)
+
+                    # Extract the grid cell image from the cropped raster
+                    window = rasterio.windows.Window(crop_size + i, crop_size + j, grid_size, grid_size)
+                    cell_image = cropped_raster[:, j:j+grid_size, i:i+grid_size]
+
+                    # Check if the cell image contains only min and max values
+                    is_artifact = np.all((cell_image == 0) | (cell_image == 255))
+                    if is_artifact:
+                        # Do not save the image if it's an artifact
+                        cell_image = np.full_like(cell_image, 128, dtype=np.uint8)
+                    
+                    # Normalize each channel separately if it has a valid range
+                    for channel in range(cell_image.shape[0]):
+                        cell_min = cell_image[channel].min()
+                        cell_max = cell_image[channel].max()
+                        if cell_min != cell_max:
+                            cell_image[channel] = (cell_image[channel] - cell_min) / (cell_max - cell_min) * 255
+                        else:
+                            cell_image[channel] = np.zeros_like(cell_image[channel])
+
+                    cell_image = np.clip(cell_image, 0, 255).astype(np.uint8)
+
+                    # Display the current cell image channels
+                    display_channels(cell_image, frame, image_count)
+
+                    # Check for rhododendron presence
+                    intersects = gdf.intersects(cell_bounds).any()
+                    class_label = "rhododendron" if intersects else "non_rhododendron"
+                    
+                    # Print debugging information
+                    print(f"Cell bounds: {cell_bounds}")
+                    print(f"Intersection check: {'rhododendron' if intersects else 'non_rhododendron'}")
+
+                    # Save the image if it's not an artifact
+                    if not np.all((cell_image == 128)):
+                        output_subdir = os.path.join(output_image_dir, class_label)
+                        map_output_subdir = os.path.join(output_map_dir, class_label)
+                        file_name = f"cropped_{i}_{j}.tif"
+
+                        if intersects:
+                            rhododendron_images += 1
+                        else:
+                            non_rhododendron_images += 1
+
+                        # Save the image
+                        output_path = os.path.join(output_subdir, file_name)
+                        print(f"Saving cropped image to: {output_path}")  # Debug print
+                        transposed_image = cell_image.transpose(1, 2, 0)
+                        imsave(output_path, transposed_image, plugin="tifffile", photometric='minisblack', planarconfig='contig')
+
+                        # Save the corresponding map
+                        map_output_path = os.path.join(map_output_subdir, file_name)
+                        print(f"Saving cropped map to: {map_output_path}")  # Debug print
+                        map_cell = map_data[crop_size + j:crop_size + j + grid_size, crop_size + i:crop_size + i + grid_size]
+                        imsave(map_output_path, map_cell, plugin="tifffile", photometric='minisblack', planarconfig='contig')
+
+                    total_images += 1
+                    image_count += 1
+
+    except Exception as e:
+        print(f"Error processing raster: {e}")
+        raise
+
+    print("Processing complete.")
+    print(f"Total images: {total_images}")
+    print(f"Rhododendron images: {rhododendron_images}")
+    print(f"Non-rhododendron images: {non_rhododendron_images}")
+
+# Function to update the Tkinter window periodically
+def update_gui():
+    if not image_queue.empty():
+        cell_image, image_count = image_queue.get()
+        display_channels(cell_image, frame, image_count)
+    root.after(100, update_gui)
+
+# Set up Tkinter window
+root = Tk()
+root.title("Image Viewer")
+
+# Create a dark theme style
+style = ttk.Style()
+style.theme_use('clam')
+style.configure('TLabel', background='white', foreground='black')
+
+# Create a frame for image display
+frame = Frame(root)
+frame.pack()
+
+# Create labels for displaying images
+label_rgb = Label(frame)
+label_rgb.pack(side='left', padx=5)
+
+labels = [Label(frame) for _ in range(3)]
+for label in labels:
+    label.pack(side='left', padx=5)
+
+# Queue for inter-thread communication
+image_queue = queue.Queue()
+
+# Load shapefile
+load_shapefile()
+
+# Start image processing in a separate thread
+processing_thread = threading.Thread(target=process_images, daemon=True)
+processing_thread.start()
+
+# Start the GUI update loop
+root.after(100, update_gui)
+root.mainloop()
