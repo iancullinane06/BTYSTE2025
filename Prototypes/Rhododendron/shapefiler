@@ -33,10 +33,6 @@ non_rhododendron_images = 0
 # Create output directories if they don't exist
 os.makedirs(output_image_dir, exist_ok=True)
 os.makedirs(output_map_dir, exist_ok=True)
-os.makedirs(os.path.join(output_image_dir, 'rhododendron'), exist_ok=True)
-os.makedirs(os.path.join(output_image_dir, 'non_rhododendron'), exist_ok=True)
-os.makedirs(os.path.join(output_map_dir, 'rhododendron'), exist_ok=True)
-os.makedirs(os.path.join(output_map_dir, 'non_rhododendron'), exist_ok=True)
 
 # Load the shapefile
 def load_shapefile():
@@ -167,7 +163,6 @@ def process_images():
 
                     # Check for rhododendron presence
                     intersects = gdf.intersects(cell_bounds).any()
-                    class_label = "rhododendron" if intersects else "non_rhododendron"
                     
                     # Print debugging information
                     print(f"Cell bounds: {cell_bounds}")
@@ -175,28 +170,25 @@ def process_images():
 
                     # Save the image if it's not an artifact
                     if not np.all((cell_image == 128)):
-                        output_subdir = os.path.join(output_image_dir, class_label)
-                        map_output_subdir = os.path.join(output_map_dir, class_label)
                         file_name = f"{i}_{j}.tif"
-
-                        if intersects:
-                            rhododendron_images += 1
-                        else:
-                            non_rhododendron_images += 1
-
+                        
                         # Save the image
-                        output_path = os.path.join(output_subdir, file_name)
+                        output_path = os.path.join(output_image_dir, file_name)
                         print(f"Saving image to: {output_path}")  # Debug print
                         transposed_image = cell_image.transpose(1, 2, 0)
                         imsave(output_path, transposed_image, plugin="tifffile", photometric='minisblack', planarconfig='contig')
 
                         # Save the corresponding map
-                        map_output_path = os.path.join(map_output_subdir, file_name)
+                        map_output_path = os.path.join(output_map_dir, file_name)
                         print(f"Saving map to: {map_output_path}")  # Debug print
                         map_cell = map_data[j:j+grid_size, i:i+grid_size]
                         imsave(map_output_path, map_cell, plugin="tifffile", photometric='minisblack', planarconfig='contig')
 
                     total_images += 1
+                    if intersects:
+                        rhododendron_images += 1
+                    else:
+                        non_rhododendron_images += 1
                     image_count += 1
 
             # Crop the entire image
@@ -248,7 +240,6 @@ def process_images():
 
                     # Check for rhododendron presence
                     intersects = gdf.intersects(cell_bounds).any()
-                    class_label = "rhododendron" if intersects else "non_rhododendron"
                     
                     # Print debugging information
                     print(f"Cell bounds: {cell_bounds}")
@@ -256,23 +247,16 @@ def process_images():
 
                     # Save the image if it's not an artifact
                     if not np.all((cell_image == 128)):
-                        output_subdir = os.path.join(output_image_dir, class_label)
-                        map_output_subdir = os.path.join(output_map_dir, class_label)
                         file_name = f"cropped_{i}_{j}.tif"
-
-                        if intersects:
-                            rhododendron_images += 1
-                        else:
-                            non_rhododendron_images += 1
-
+                        
                         # Save the image
-                        output_path = os.path.join(output_subdir, file_name)
+                        output_path = os.path.join(output_image_dir, file_name)
                         print(f"Saving cropped image to: {output_path}")  # Debug print
                         transposed_image = cell_image.transpose(1, 2, 0)
                         imsave(output_path, transposed_image, plugin="tifffile", photometric='minisblack', planarconfig='contig')
 
                         # Save the corresponding map
-                        map_output_path = os.path.join(map_output_subdir, file_name)
+                        map_output_path = os.path.join(output_map_dir, file_name)
                         print(f"Saving cropped map to: {map_output_path}")  # Debug print
                         map_cell = map_data[crop_size + j:crop_size + j + grid_size, crop_size + i:crop_size + i + grid_size]
                         imsave(map_output_path, map_cell, plugin="tifffile", photometric='minisblack', planarconfig='contig')
