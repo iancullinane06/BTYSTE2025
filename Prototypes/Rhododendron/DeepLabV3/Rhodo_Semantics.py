@@ -220,13 +220,21 @@ def create_deeplabv3_model(input_shape, num_classes=1):
     model = Model(inputs, outputs)
     return model
 
-# Define the custom mIoU metric
-def mean_iou(y_true, y_pred):
-    y_pred = tf.round(y_pred)  # Round the predictions to the nearest integer (0 or 1)
-    intersect = tf.reduce_sum(y_true * y_pred, axis=[1, 2, 3])
-    union = tf.reduce_sum(y_true + y_pred, axis=[1, 2, 3]) - intersect
-    iou = tf.reduce_mean((intersect + 1e-6) / (union + 1e-6))  # Avoid division by zero
-    return iou
+def boundary_iou(y_true, y_pred, threshold=0.5):
+    def binary_boundary(mask):
+        """Extracts boundary from a binary mask."""
+        mask = tf.cast(mask > threshold, tf.uint8)
+        boundary = tf.image.sobel_edges(tf.cast(mask, tf.float32))
+        return tf.reduce_sum(tf.abs(boundary), axis=-1)
+
+    y_true_boundary = binary_boundary(y_true)
+    y_pred_boundary = binary_boundary(y_pred)
+
+    intersect = tf.reduce_sum(tf.minimum(y_true_boundary, y_pred_boundary))
+    union = tf.reduce_sum(tf.maximum(y_true_boundary, y_pred_boundary))
+
+    iou = (intersect + 1e-6) / (union + 1e-6)  # Avoid division by zero
+    return tf.reduce_mean(iou)
 
 # Calculate number of batches per epoch
 num_batches_per_epoch = len(train_filepaths) // BATCH_SIZE
@@ -235,10 +243,10 @@ print(f"Number of batches per epoch: {num_batches_per_epoch}")
 # Create the model
 model = create_deeplabv3_model((IMG_HEIGHT, IMG_WIDTH, IMG_CHANNELS), num_classes=1)
 
-# Compile the model
+# Compile the model with Boundary IoU metric
 model.compile(optimizer=optimizers.Adam(learning_rate=LEARNING_RATE),
-              loss='binary_crossentropy',  # Use binary_crossentropy for binary segmentation
-              metrics=[mean_iou])  # Use custom mIoU metric
+              loss='binary_crossentropy',
+              metrics=[boundary_iou])  # Use Boundary IoU metric
 
 # Setup TensorBoard logging
 tensorboard_callback = tf.keras.callbacks.TensorBoard(log_dir=LOG_DIR, histogram_freq=1)
@@ -251,7 +259,6 @@ history = model.fit(
     callbacks=[tensorboard_callback]
 )
 
-# Plot training & validation loss/mIoU curves
 def plot_history(history):
     plt.figure(figsize=(12, 4))
 
@@ -264,11 +271,11 @@ def plot_history(history):
     plt.legend()
 
     plt.subplot(1, 2, 2)
-    plt.plot(history.history['mean_iou'], label='Train mIoU')
-    plt.plot(history.history['val_mean_iou'], label='Validation mIoU')
-    plt.title('Mean IoU')
+    plt.plot(history.history['boundary_iou'], label='Train Boundary IoU')
+    plt.plot(history.history['val_boundary_iou'], label='Validation Boundary IoU')
+    plt.title('Boundary IoU')
     plt.xlabel('Epoch')
-    plt.ylabel('Mean IoU')
+    plt.ylabel('Boundary IoU')
     plt.legend()
 
     plt.show()
@@ -276,9 +283,9 @@ def plot_history(history):
 plot_history(history)
 
 # Evaluate the model
-test_loss, test_miou = model.evaluate(test_generator)
+test_loss, test_boundary_iou = model.evaluate(test_generator)
 print(f"Test Loss: {test_loss}")
-print(f"Test Mean IoU: {test_miou}")
+print(f"Test Boundary IoU: {test_boundary_iou}")
 
 # Save the model
 model.save('DLV3-model.h5')
