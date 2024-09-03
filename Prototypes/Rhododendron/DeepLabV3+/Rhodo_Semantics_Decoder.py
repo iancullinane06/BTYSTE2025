@@ -9,6 +9,7 @@ from keras import optimizers
 from keras.layers import Input, Conv2D, DepthwiseConv2D, GlobalAveragePooling2D, BatchNormalization, Activation, UpSampling2D, Reshape, Concatenate, Dropout
 from keras.models import Model
 from keras.applications import DenseNet121
+from keras.regularizers import l2
 from dotenv import load_dotenv
 import datetime
 
@@ -36,7 +37,16 @@ def augment_image(image, mask):
     if np.random.rand() > 0.5:
         image = tf.image.rot90(image, k=np.random.randint(4))
         mask = tf.image.rot90(mask, k=np.random.randint(4))
+    if np.random.rand() > 0.5:
+        image = tf.image.random_brightness(image, max_delta=0.1)
+    if np.random.rand() > 0.5:
+        image = tf.image.random_contrast(image, lower=0.9, upper=1.1)
     return image, mask
+
+def normalize_image(image):
+    for c in range(image.shape[-1]):
+        image[..., c] = (image[..., c] - np.mean(image[..., c])) / np.std(image[..., c])
+    return image
 
 class TiffDataGenerator(Sequence):
     def __init__(self, filepaths, masks, batch_size, img_height, img_width, img_channels, augment=False, max_batches_per_epoch=None):
@@ -76,8 +86,8 @@ class TiffDataGenerator(Sequence):
             np.random.shuffle(self.indices)
 
     def __data_generation(self, batch_filepaths, batch_masks):
-        X = np.empty((self.batch_size, self.img_height, self.img_width, self.img_channels))
-        y = np.empty((self.batch_size, self.img_height, self.img_width, 1))  # Ensure masks have 1 channel
+        X = np.empty((self.batch_size, self.img_height, self.img_width, self.img_channels), dtype=np.float32)
+        y = np.empty((self.batch_size, self.img_height, self.img_width, 1), dtype=np.float32)  # Ensure masks have 1 channel
 
         for i, (filepath, maskpath) in enumerate(zip(batch_filepaths, batch_masks)):
             img = tiff.imread(filepath)
@@ -90,15 +100,22 @@ class TiffDataGenerator(Sequence):
             # Resize images and masks
             img = tf.image.resize(img, (self.img_height, self.img_width))
             mask = tf.image.resize(mask, (self.img_height, self.img_width))
-            
+
             # Convert mask values for binary classification
             mask = np.where(mask == 2, 1, 0)  # Adjust this according to your mask values
             
-            # Normalize the images and masks
-            X[i] = img / 255.0
+            # Convert image and mask to NumPy arrays
+            img = img.numpy() if isinstance(img, tf.Tensor) else img
+            mask = mask.numpy() if isinstance(mask, tf.Tensor) else mask
+
+            # Normalize the images
+            img = img / 255.0
+
+            X[i] = img
             y[i] = mask  # Already added the channel dimension
 
         return X, y
+
 
 def load_data(data_dir):
     filepaths = []
@@ -161,6 +178,12 @@ def dice_loss(y_true, y_pred):
     """
     return 1 - dice_coefficient(y_true, y_pred)
 
+def combined_loss(y_true, y_pred):
+    """
+    Combined loss: Dice loss + Binary Cross-Entropy
+    """
+    return dice_loss(y_true, y_pred) + tf.keras.losses.binary_crossentropy(y_true, y_pred)
+
 def ASPP_module(x):
     """
     Atrous Spatial Pyramid Pooling (ASPP) module.
@@ -198,7 +221,7 @@ def ASPP_module(x):
 
     return x
 
-def create_deeplabv3_plus_model(input_shape, num_classes=1):
+def DeepLabV3Plus(input_shape, num_classes=1):
     inputs = Input(shape=input_shape)
 
     # Initial Conv layer to handle multiple channels
@@ -206,7 +229,7 @@ def create_deeplabv3_plus_model(input_shape, num_classes=1):
     x = BatchNormalization()(x)
     x = Activation("relu")(x)
 
-    # Load base model (e.g., DenseNet121)
+    # Load base model (DenseNet121)
     base_model = DenseNet121(weights=None, include_top=False, input_tensor=x)
     
     # Extract low-level features
@@ -214,7 +237,7 @@ def create_deeplabv3_plus_model(input_shape, num_classes=1):
 
     # Apply ASPP module
     x = base_model.output
-    x = ASPP_module(x)  # Define the ASPP module as per DeepLabV3
+    x = ASPP_module(x)
     
     # Resize the ASPP output to match the low-level feature map size
     target_size = tf.shape(low_level_feat)[1:3]
@@ -248,27 +271,25 @@ def create_deeplabv3_plus_model(input_shape, num_classes=1):
     model = Model(inputs, outputs)
     return model
 
-# Calculate number of batches per epoch
-num_batches_per_epoch = len(train_filepaths) // BATCH_SIZE
-print(f"Number of batches per epoch: {num_batches_per_epoch}")
-
 # Create the model
-model = create_deeplabv3_plus_model((IMG_HEIGHT, IMG_WIDTH, IMG_CHANNELS), num_classes=1)
+model = DeepLabV3Plus(input_shape=(IMG_HEIGHT, IMG_WIDTH, IMG_CHANNELS), num_classes=1)
 
-# Compile the model with Dice coefficient and Dice loss
+# Compile the model with the combined loss function and metrics
 model.compile(optimizer=optimizers.Adam(learning_rate=LEARNING_RATE),
-              loss=dice_loss,
-              metrics=[dice_coefficient])  # Use Dice Coefficient as metric
+              loss=combined_loss,
+              metrics=[dice_coefficient])
 
-# Setup TensorBoard logging
+# Callbacks
+early_stopping = tf.keras.callbacks.EarlyStopping(monitor='val_loss', patience=10, restore_best_weights=True)
+lr_scheduler = tf.keras.callbacks.ReduceLROnPlateau(monitor='val_loss', factor=0.5, patience=5, min_lr=1e-6, verbose=1)
 tensorboard_callback = tf.keras.callbacks.TensorBoard(log_dir=LOG_DIR, histogram_freq=1)
 
 # Train the model
 history = model.fit(
     train_generator,
-    validation_data=validation_generator,
     epochs=EPOCHS,
-    callbacks=[tensorboard_callback]
+    validation_data=validation_generator,
+    callbacks=[early_stopping, lr_scheduler, tensorboard_callback]
 )
 
 def plot_history(history):
