@@ -21,78 +21,27 @@ IMAGE_DIR = os.getenv('RHODODENDRON-SAMPLES')  # Directory containing all images
 MASK_DIR = os.getenv('RHODODENDRON-SAMPLES-MASKS')  # Directory containing all masks
 MODEL_PATH = os.getenv('RHODODENDRON-DEEPLAB-MODEL')
 
-# Define Boundary IoU
-def boundary_iou(y_true, y_pred, threshold=0.5):
-    def binary_boundary(mask):
-        mask = tf.cast(mask > threshold, tf.uint8)
-        boundary = tf.image.sobel_edges(tf.cast(mask, tf.float32))
-        return tf.reduce_sum(tf.abs(boundary), axis=-1)
+def dice_coefficient(y_true, y_pred, smooth=1):
+    """
+    Dice Coefficient for binary segmentation.
+    """
+    y_true_f = tf.keras.backend.flatten(y_true)
+    y_pred_f = tf.keras.backend.flatten(y_pred)
+    intersection = tf.keras.backend.sum(y_true_f * y_pred_f)
+    return (2. * intersection + smooth) / (tf.keras.backend.sum(y_true_f) + tf.keras.backend.sum(y_pred_f) + smooth)
 
-    y_true_boundary = binary_boundary(y_true)
-    y_pred_boundary = binary_boundary(y_pred)
+def dice_loss(y_true, y_pred):
+    """
+    Dice loss function, which is 1 - Dice Coefficient.
+    """
+    return 1 - dice_coefficient(y_true, y_pred)
 
-    intersect = tf.reduce_sum(tf.minimum(y_true_boundary, y_pred_boundary))
-    union = tf.reduce_sum(tf.maximum(y_true_boundary, y_pred_boundary))
-
-    iou = (intersect + 1e-6) / (union + 1e-6)
-    return tf.reduce_mean(iou)
-
-# Define Background Accuracy
-def background_accuracy(y_true, y_pred, threshold=0.5):
-    y_true_bin = tf.cast(y_true > threshold, tf.float32)
-    y_pred_bin = tf.cast(y_pred > threshold, tf.float32)
-    background_mask = tf.cast(y_true_bin == 0, tf.float32)
-    
-    correct_background_preds = tf.reduce_sum(background_mask * y_pred_bin)
-    total_background_pixels = tf.reduce_sum(background_mask)
-    
-    background_accuracy = (correct_background_preds + 1e-6) / (total_background_pixels + 1e-6)
-    return tf.reduce_mean(background_accuracy)
-
-# Define Composite Loss Function
-def composite_loss(alpha=1.0, beta=1.0, threshold=0.5):
-    def loss(y_true, y_pred):
-        boundary_iou_value = boundary_iou(y_true, y_pred, threshold)
-        background_accuracy_value = background_accuracy(y_true, y_pred, threshold)
-        bce_loss = tf.keras.losses.binary_crossentropy(y_true, y_pred)
-        combined_loss = alpha * boundary_iou_value - beta * background_accuracy_value + bce_loss
-        return combined_loss
-    return loss
-
-def mean_iou(y_true, y_pred, num_classes=2):
-    y_true = tf.cast(y_true, tf.int32)
-    y_pred = tf.argmax(y_pred, axis=-1)
-    y_pred = tf.cast(y_pred, tf.int32)
-
-    # Calculate IoU for each class
-    iou = []
-    for i in range(num_classes):
-        true_mask = tf.equal(y_true, i)
-        pred_mask = tf.equal(y_pred, i)
-        intersection = tf.reduce_sum(tf.cast(true_mask & pred_mask, tf.float32))
-        union = tf.reduce_sum(tf.cast(true_mask | pred_mask, tf.float32))
-        iou.append(intersection / (union + tf.keras.backend.epsilon()))
-
-    # Return mean IoU
-    return tf.reduce_mean(iou)
-
-def boundary_iou(y_true, y_pred, threshold=0.5):
-    def binary_boundary(mask):
-        """Extracts boundary from a binary mask."""
-        mask = tf.cast(mask > threshold, tf.uint8)
-        boundary = tf.image.sobel_edges(tf.cast(mask, tf.float32))
-        return tf.reduce_sum(tf.abs(boundary), axis=-1)
-
-    y_true_boundary = binary_boundary(y_true)
-    y_pred_boundary = binary_boundary(y_pred)
-
-    intersect = tf.reduce_sum(tf.minimum(y_true_boundary, y_pred_boundary))
-    union = tf.reduce_sum(tf.maximum(y_true_boundary, y_pred_boundary))
-
-    iou = (intersect + 1e-6) / (union + 1e-6)  # Avoid division by zero
-    return tf.reduce_mean(iou)
-
-model = load_model(MODEL_PATH, custom_objects={'boundary_iou': boundary_iou})
+def combined_loss(y_true, y_pred):
+    """
+    Combined loss: Dice loss + Binary Cross-Entropy
+    """
+    return dice_loss(y_true, y_pred) + tf.keras.losses.binary_crossentropy(y_true, y_pred)
+model = load_model(MODEL_PATH, custom_objects={'combined_loss': combined_loss, 'dice_coefficient': dice_coefficient})
 
 def preprocess_image(image_path, img_height, img_width):
     """
