@@ -19,9 +19,9 @@ load_dotenv()
 IMG_HEIGHT = 244
 IMG_WIDTH = 244
 IMG_CHANNELS = 6
-BATCH_SIZE = 4
+BATCH_SIZE = 8
 EPOCHS = 100
-LEARNING_RATE = 1e-3
+LEARNING_RATE = 1e-1
 LOG_DIR = os.getenv('LOG_DIR', "./.logs/Rhodo-semantics-plus/" + datetime.datetime.now().strftime("%Y%m%d-%H%M%S"))
 
 data_dir = os.getenv('RHODODENDRON-DATASET')
@@ -259,7 +259,7 @@ def DeepLabV3Plus(input_shape, num_classes=1):
     x = BatchNormalization()(x)
     x = Activation("relu")(x)
     
-    x = Dropout(0.5)(x)
+    x = Dropout(0.2)(x)
 
     # Final upsampling to the original image size
     final_upsample_size = (input_shape[0], input_shape[1])
@@ -280,8 +280,8 @@ model.compile(optimizer=optimizers.Adam(learning_rate=LEARNING_RATE),
               metrics=[dice_coefficient])
 
 # Callbacks
-early_stopping = tf.keras.callbacks.EarlyStopping(monitor='val_loss', patience=10, restore_best_weights=True)
-lr_scheduler = tf.keras.callbacks.ReduceLROnPlateau(monitor='val_loss', factor=0.5, patience=5, min_lr=1e-6, verbose=1)
+early_stopping = tf.keras.callbacks.EarlyStopping(monitor='val_loss', patience=15, verbose=1, restore_best_weights=True)
+lr_scheduler = tf.keras.callbacks.ReduceLROnPlateau(monitor='val_loss', factor=0.2, patience=5, min_lr=1e-6, verbose=1)
 tensorboard_callback = tf.keras.callbacks.TensorBoard(log_dir=LOG_DIR, histogram_freq=1)
 
 # Train the model
