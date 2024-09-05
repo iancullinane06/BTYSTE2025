@@ -1,4 +1,5 @@
-# SkySci
+![EcoLytix-Icon](https://github.com/user-attachments/assets/541a3711-02e7-458d-87d9-c497837a6bc5)
+
 
 This is the repository for my project for BTYSTE (the BT Young Scientist & Technology Exhibition). The goal of this project is to leverage machine learning techniques for environmental monitoring and analysis using image data. Specifically, I focus on the tasks of semantic segmentation and classification to identify specific plant species and detect forest fires. The datasets utilized in this project include those generously supplied by Coillte, the ADE20K dataset, and several others.
 
