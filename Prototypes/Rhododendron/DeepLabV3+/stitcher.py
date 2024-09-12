@@ -1,3 +1,6 @@
+from EcoLytix.Packages.accuracy import *
+from EcoLytix.Packages.loss import *
+
 import os
 import numpy as np
 import rasterio
@@ -36,16 +39,6 @@ os.makedirs(output_dir, exist_ok=True)
 # Parameters
 IMG_HEIGHT, IMG_WIDTH, IMG_CHANNELS = 244, 244, 6
 grid_size = 244
-
-# Load model
-def dice_coefficient(y_true, y_pred, smooth=1):
-    y_true_f = K.flatten(y_true)
-    y_pred_f = K.flatten(y_pred)
-    intersection = K.sum(y_true_f * y_pred_f)
-    return (2. * intersection + smooth) / (K.sum(y_true_f) + K.sum(y_pred_f) + smooth)
-
-def combined_loss(y_true, y_pred):
-    return 1 - dice_coefficient(y_true, y_pred) + tf.keras.losses.binary_crossentropy(y_true, y_pred)
 
 model = load_model(model_path, custom_objects={'combined_loss': combined_loss, 'dice_coefficient': dice_coefficient})
 
@@ -100,6 +93,7 @@ def process_and_inference_raster():
 
 # Preprocess image for inference
 def preprocess_image(cell_image):
+    cell_image = np.clip(cell_image, 0, 255).astype(np.uint8)
     cell_image = tf.image.resize(cell_image.transpose(1, 2, 0), (IMG_HEIGHT, IMG_WIDTH))  # Resize to model input
     cell_image = cell_image / 255.0  # Normalize
     return np.expand_dims(cell_image, axis=0)

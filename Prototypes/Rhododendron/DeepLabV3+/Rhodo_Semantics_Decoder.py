@@ -1,3 +1,6 @@
+from EcoLytix.Packages.accuracy import *
+from EcoLytix.Packages.loss import *
+
 import os
 import numpy as np
 import matplotlib.pyplot as plt
@@ -21,7 +24,7 @@ IMG_WIDTH = 244
 IMG_CHANNELS = 6
 BATCH_SIZE = 8
 EPOCHS = 100
-LEARNING_RATE = 1e-1
+LEARNING_RATE = 1e-2
 LOG_DIR = os.getenv('LOG_DIR', "./.logs/Rhodo-semantics-plus/" + datetime.datetime.now().strftime("%Y%m%d-%H%M%S"))
 
 data_dir = os.getenv('RHODODENDRON-DATASET')
@@ -163,27 +166,6 @@ train_generator = TiffDataGenerator(train_filepaths, train_masks, BATCH_SIZE, IM
 validation_generator = TiffDataGenerator(val_filepaths, val_masks, BATCH_SIZE, IMG_HEIGHT, IMG_WIDTH, IMG_CHANNELS, augment=False)
 test_generator = TiffDataGenerator(test_filepaths, test_masks, BATCH_SIZE, IMG_HEIGHT, IMG_WIDTH, IMG_CHANNELS, augment=False)
 
-def dice_coefficient(y_true, y_pred, smooth=1):
-    """
-    Dice Coefficient for binary segmentation.
-    """
-    y_true_f = tf.keras.backend.flatten(y_true)
-    y_pred_f = tf.keras.backend.flatten(y_pred)
-    intersection = tf.keras.backend.sum(y_true_f * y_pred_f)
-    return (2. * intersection + smooth) / (tf.keras.backend.sum(y_true_f) + tf.keras.backend.sum(y_pred_f) + smooth)
-
-def dice_loss(y_true, y_pred):
-    """
-    Dice loss function, which is 1 - Dice Coefficient.
-    """
-    return 1 - dice_coefficient(y_true, y_pred)
-
-def combined_loss(y_true, y_pred):
-    """
-    Combined loss: Dice loss + Binary Cross-Entropy
-    """
-    return dice_loss(y_true, y_pred) + tf.keras.losses.binary_crossentropy(y_true, y_pred)
-
 def ASPP_module(x):
     """
     Atrous Spatial Pyramid Pooling (ASPP) module.
@@ -274,14 +256,13 @@ def DeepLabV3Plus(input_shape, num_classes=1):
 # Create the model
 model = DeepLabV3Plus(input_shape=(IMG_HEIGHT, IMG_WIDTH, IMG_CHANNELS), num_classes=1)
 
-# Compile the model with the combined loss function and metrics
-model.compile(optimizer=optimizers.Adam(learning_rate=LEARNING_RATE),
+model.compile(optimizer=optimizers.SGD(learning_rate=LEARNING_RATE),
               loss=combined_loss,
-              metrics=[dice_coefficient])
+              metrics=[dice_coefficient, f2_score, pixel_accuracy, mean_iou])
 
 # Callbacks
-early_stopping = tf.keras.callbacks.EarlyStopping(monitor='val_loss', patience=15, verbose=1, restore_best_weights=True)
-lr_scheduler = tf.keras.callbacks.ReduceLROnPlateau(monitor='val_loss', factor=0.2, patience=5, min_lr=1e-6, verbose=1)
+early_stopping = tf.keras.callbacks.EarlyStopping(monitor='val_loss', patience=25, restore_best_weights=True, verbose=1)
+lr_scheduler = tf.keras.callbacks.ReduceLROnPlateau(monitor='val_loss', factor=0.2, patience=20, min_lr=1e-6, verbose=1)
 tensorboard_callback = tf.keras.callbacks.TensorBoard(log_dir=LOG_DIR, histogram_freq=1)
 
 # Train the model
@@ -316,9 +297,12 @@ def plot_history(history):
 plot_history(history)
 
 # Evaluate the model
-test_loss, test_dice_coefficient = model.evaluate(test_generator)
+test_loss, test_dice_coefficient, test_f2_score, test_pixel_accuracy, test_mean_iou = model.evaluate(test_generator)
 print(f"Test Loss: {test_loss}")
 print(f"Test Dice Coefficient: {test_dice_coefficient}")
+print(f"Test F2 Score: {test_f2_score}")
+print(f"Test Pixel Accuracy: {test_pixel_accuracy}")
+print(f"Test Mean IoU: {test_mean_iou}")
 
 # Save the model
 model.save('DLV3+-model.h5')
