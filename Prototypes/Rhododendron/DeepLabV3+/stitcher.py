@@ -141,10 +141,24 @@ def update_plot(axes, text, cell_image, prediction, location):
 
 # Preprocess image for inference
 def preprocess_image(cell_image):
+    # Normalize each channel separately if it has a valid range
+    for channel in range(cell_image.shape[0]):
+        channel_image = cell_image[channel]
+        cell_min = channel_image.min()
+        cell_max = channel_image.max()
+        if cell_min != cell_max:
+            cell_image[channel] = (channel_image - cell_min) / (cell_max - cell_min) * 255
+        else:
+            cell_image[channel] = np.zeros_like(channel_image)
+
+    # Clip the values to 0-255 and convert to uint8
     cell_image = np.clip(cell_image, 0, 255).astype(np.uint8)
+    
+    # Resize and normalize the image for the model
     cell_image = tf.image.resize(cell_image.transpose(1, 2, 0), (IMG_HEIGHT, IMG_WIDTH))  # Resize to model input
     cell_image = cell_image / 255.0  # Normalize
     return np.expand_dims(cell_image, axis=0)
+
 
 # Save the stitched result with the original raster's spatial information
 def write_stitched_result(stitched_result, src, output_path):
