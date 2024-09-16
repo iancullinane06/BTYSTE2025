@@ -1,15 +1,11 @@
-import os
 import sys
+import os
 
-# Go up two directories to get to the root directory (root_dir)
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', '..')))
-
-from EcoLytix.Packages.accuracy import *
-from EcoLytix.Packages.loss import *
+from EcoLytix.Packages import *
 
 import numpy as np
 import rasterio
-from shapely.geometry import box
 import geopandas as gpd
 import tensorflow as tf
 from keras.models import load_model
@@ -47,6 +43,9 @@ grid_size = 244
 
 model = load_model(model_path, custom_objects={'combined_loss': combined_loss, 'dice_coefficient': dice_coefficient})
 
+# Enable interactive mode
+plt.ion()
+
 # Function to process the raster, run inference, and generate shapefile
 def process_and_inference_raster():
     with rasterio.open(raster_path) as src:
@@ -77,8 +76,8 @@ def process_and_inference_raster():
                 prediction = model.predict(processed_image)[0]
                 prediction = prediction.squeeze()
 
-                # Debugging: Check range of prediction values
-                print(f"Prediction range for tile at ({i}, {j}): {prediction.min()} - {prediction.max()}")
+                # Visualize input channels and the prediction before applying threshold
+                visualize_channels_and_prediction(cell_image_resized, prediction, i, j)
 
                 # Apply threshold to convert the prediction to binary
                 binary_prediction = (prediction >= threshold).astype(int)
@@ -95,6 +94,9 @@ def process_and_inference_raster():
         shapefile_output_path = os.path.join(output_dir, 'prediction_shapefile.shp')
         raster_to_shapefile(stitched_result, transform, crs.to_epsg(), shapefile_output_path)
         display_shapefile(shapefile_output_path)
+        
+    # Enable interactive mode
+    plt.ion()
 
 # Preprocess image for inference
 def preprocess_image(cell_image):
@@ -102,6 +104,28 @@ def preprocess_image(cell_image):
     cell_image = tf.image.resize(cell_image.transpose(1, 2, 0), (IMG_HEIGHT, IMG_WIDTH))  # Resize to model input
     cell_image = cell_image / 255.0  # Normalize
     return np.expand_dims(cell_image, axis=0)
+
+# Visualize the input channels and the prediction
+def visualize_channels_and_prediction(cell_image, prediction, i, j):
+    num_channels = cell_image.shape[0]
+    plt.figure(figsize=(20, 5))
+    
+    # Display input channels
+    for channel in range(num_channels):
+        plt.subplot(2, num_channels, channel + 1)
+        plt.imshow(cell_image[channel, :, :], cmap='gray')
+        plt.title(f'Input Channel {channel + 1}')
+        plt.axis('off')
+    
+    # Display raw prediction
+    plt.subplot(2, num_channels, num_channels + 1)
+    plt.imshow(prediction, cmap='gray', vmin=0, vmax=1)
+    plt.title(f'Prediction at ({i}, {j})')
+    plt.colorbar()
+    plt.axis('off')
+
+    plt.draw()
+    plt.pause(1)  # Pause to update the plot
 
 # Save the stitched result with the original raster's spatial information
 def write_stitched_result(stitched_result, src, output_path):
