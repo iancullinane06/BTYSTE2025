@@ -2,7 +2,7 @@ import os
 import sys
 
 # Go up two directories to get to the root directory (root_dir)
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', '..', '..')))
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', '..')))
 
 from EcoLytix.Packages.accuracy import *
 from EcoLytix.Packages.loss import *
