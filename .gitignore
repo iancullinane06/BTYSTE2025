@@ -1,7 +1,19 @@
+# Environment variables
 .env
+
+# Datasets
 .data
 .Datasets
+
+# Log files
 .logs
+
+# saved model
 .Models
+
+#Report
 .Report_Book
 Application
+
+# Python Cache files
+__pycache__/

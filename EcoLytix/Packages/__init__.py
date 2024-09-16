@@ -1,2 +1,2 @@
-from loss import *
-from accuracy import *
+from .loss import *
+from .accuracy import *
