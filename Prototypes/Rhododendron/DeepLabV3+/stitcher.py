@@ -41,7 +41,7 @@ os.makedirs(output_dir, exist_ok=True)
 IMG_HEIGHT, IMG_WIDTH, IMG_CHANNELS = 244, 244, 6
 grid_size = 244
 
-model = load_model(model_path, custom_objects={'combined_loss': combined_loss, 'dice_coefficient': dice_coefficient})
+model = load_model(model_path, custom_objects={'combined_loss': combined_loss, 'dice_coefficient': dice_coefficient, 'f2_score': f2_score, 'pixel_accuracy': pixel_accuracy, 'mean_iou': mean_iou})
 
 # Enable interactive mode
 plt.ion()
@@ -175,7 +175,7 @@ def write_stitched_result(stitched_result, src, output_path):
     ) as dst:
         dst.write(stitched_result, 1)
 
-# Convert the thresholded raster to shapefile
+# Convert the thresholded raster to shapefile, but only keep rhododendron areas
 def raster_to_shapefile(raster_array, transform, crs, shapefile_path):
     shapes_gen = shapes(raster_array, transform=transform)
 
@@ -185,13 +185,14 @@ def raster_to_shapefile(raster_array, transform, crs, shapefile_path):
         'properties': {'class': 'int'}
     }
 
-    # Write to shapefile
+    # Write to shapefile, but only include shapes with value 1 (rhododendron presence)
     with fiona.open(shapefile_path, 'w', 'ESRI Shapefile', schema=schema, crs=from_epsg(crs)) as shp:
         for geom, value in shapes_gen:
-            shp.write({
-                'geometry': mapping(shape(geom)),
-                'properties': {'class': int(value)}
-            })
+            if int(value) == 1:  # Only write shapes for rhododendron areas
+                shp.write({
+                    'geometry': mapping(shape(geom)),
+                    'properties': {'class': 1}  # Class 1 for rhododendron
+                })
 
 # Display the shapefile using Tkinter
 def display_shapefile(shapefile_path):
