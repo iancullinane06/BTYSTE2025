@@ -9,13 +9,14 @@ import rasterio
 import geopandas as gpd
 import tensorflow as tf
 from keras.models import load_model
-from keras import backend as K
 from dotenv import load_dotenv
 from rasterio.windows import Window
 from rasterio.features import shapes
 import fiona
 from fiona.crs import from_epsg
 from shapely.geometry import shape, mapping
+import threading  # For handling long-running tasks without freezing the UI
+from tkinter import ttk
 import tkinter as tk
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 import matplotlib.pyplot as plt
@@ -41,25 +42,47 @@ os.makedirs(output_dir, exist_ok=True)
 IMG_HEIGHT, IMG_WIDTH, IMG_CHANNELS = 244, 244, 6
 grid_size = 244
 
+# Load the model
 model = load_model(model_path, custom_objects={'combined_loss': combined_loss, 'dice_coefficient': dice_coefficient, 'f2_score': f2_score, 'pixel_accuracy': pixel_accuracy, 'mean_iou': mean_iou})
 
-# Enable interactive mode
-plt.ion()
+# Create Tkinter window
+root = tk.Tk()
+root.title("Inference stitcher")
+root.geometry("800x600")
 
-# Function to process the raster, run inference, and generate shapefile
+# Set window icon (you need to specify your image path)
+icon_path = os.getenv('ECOLYTIX-LOGO-ICON')  # Replace with the correct icon path
+root.iconbitmap(icon_path)
+
+# Apply dark theme
+style = ttk.Style()
+style.theme_use('clam')
+style.configure('TFrame', background='#333')
+style.configure('TLabel', background='#333', foreground='white')
+style.configure('TProgressbar', troughcolor='#555', background='#00cc66')
+
+# Create frame and progress bar
+frame = ttk.Frame(root, padding=10)
+frame.pack(fill=tk.BOTH, expand=True)
+progress = ttk.Progressbar(frame, orient=tk.HORIZONTAL, length=600, mode='determinate')
+progress.pack(pady=10)
+
+# Initialize figure for predictions
+fig, ax = plt.subplots(figsize=(5, 5))
+canvas = FigureCanvasTkAgg(fig, master=frame)
+canvas.draw()
+canvas.get_tk_widget().pack(side=tk.TOP, fill=tk.BOTH, expand=True)
+
+# Function to process the raster and run inference with progress update
 def process_and_inference_raster():
     with rasterio.open(raster_path) as src:
         crs = src.crs
         transform = src.transform
-        raster = src.read()
-        raster_height, raster_width = raster.shape[1], raster.shape[2]
-        num_channels = raster.shape[0]
-
-        # Initialize stitched result
+        raster_height, raster_width = src.height, src.width
         stitched_result = np.zeros((raster_height, raster_width), dtype=np.float32)
 
-        # Initialize figure for dynamic updates
-        fig, axes, text = initialize_plot(num_channels)
+        num_steps = (raster_width // grid_size) * (raster_height // grid_size)
+        current_step = 0
 
         for i in range(0, raster_width, grid_size):
             for j in range(0, raster_height, grid_size):
@@ -68,99 +91,52 @@ def process_and_inference_raster():
                 window = Window(i, j, window_width, window_height)
                 cell_image = src.read(window=window)
 
-                # Resize the cell image if it's smaller than the grid size (edge case)
-                cell_image_resized = np.zeros((num_channels, grid_size, grid_size), dtype=cell_image.dtype)
-                cell_image_resized[:, :window_height, :window_width] = cell_image
-
-                # Normalize and preprocess the image for inference
-                processed_image = preprocess_image(cell_image_resized)
-
-                # Run inference
-                prediction = model.predict(processed_image)[0]
-                prediction = prediction.squeeze()
-
-                # Update the existing plot with new data and tile location
-                update_plot(axes, text, cell_image_resized, prediction, (i, j))
-
-                # Apply threshold to convert the prediction to binary
+                # Preprocess and run inference
+                processed_image = preprocess_image(cell_image)
+                prediction = model.predict(processed_image)[0].squeeze()
                 binary_prediction = (prediction >= threshold).astype(int)
 
-                # Resize the binary prediction to fit back into the main result
-                prediction_resized = binary_prediction[:window_height, :window_width]
-                stitched_result[j:j+window_height, i:i+window_width] = prediction_resized
+                # Update stitched result
+                stitched_result[j:j+window_height, i:i+window_width] = binary_prediction[:window_height, :window_width]
 
-        # Write stitched result and create a vector shapefile
+                # Update plot and progress
+                ax.clear()
+                ax.imshow(stitched_result, cmap='gray')
+                canvas.draw()
+                current_step += 1
+                progress['value'] = (current_step / num_steps) * 100
+                root.update_idletasks()
+
+        # Save results
         output_path = os.path.join(output_dir, 'stitched_prediction.tif')
         write_stitched_result(stitched_result, src, output_path)
 
-        # Convert binary raster to shapefile and display
         shapefile_output_path = os.path.join(output_dir, 'prediction_shapefile.shp')
         raster_to_shapefile(stitched_result, transform, crs.to_epsg(), shapefile_output_path)
         display_shapefile(shapefile_output_path)
-        
-    # Enable interactive mode
-    plt.ion()
 
-# Initialize a single figure and axes for the input channels and prediction, including text for the location
-def initialize_plot(num_channels):
-    fig, axes = plt.subplots(2, num_channels, figsize=(20, 5))
-
-    for channel in range(num_channels):
-        axes[0, channel].imshow(np.zeros((grid_size, grid_size)), cmap='gray')
-        axes[0, channel].set_title(f'Input Channel {channel + 1}')
-        axes[0, channel].axis('off')
-
-    axes[1, 0].imshow(np.zeros((grid_size, grid_size)), cmap='gray', vmin=0, vmax=1)
-    axes[1, 0].set_title('Prediction')
-    axes[1, 0].axis('off')
-
-    # Create a text annotation for displaying tile location
-    text = fig.text(0.5, 0.95, '', ha='center', fontsize=12)
-
-    plt.tight_layout()
-    plt.show()
-
-    return fig, axes, text
-
-# Update the existing plot with new data, including the location text
-def update_plot(axes, text, cell_image, prediction, location):
-    num_channels = cell_image.shape[0]
-
-    # Update input channels
-    for channel in range(num_channels):
-        axes[0, channel].images[0].set_data(cell_image[channel, :, :])
-
-    # Update prediction
-    axes[1, 0].images[0].set_data(prediction)
-
-    # Update the tile location text
-    text.set_text(f"Processing tile at location: {location}")
-
-    plt.draw()
-    plt.pause(0.5)  # Pause to allow update
-
-# Preprocess image for inference
+# Function to preprocess the image for inference
 def preprocess_image(cell_image):
-    # Normalize each channel separately if it has a valid range
-    for channel in range(cell_image.shape[0]):
-        channel_image = cell_image[channel]
+    num_channels = cell_image.shape[0]
+    cell_image_resized = np.zeros((num_channels, grid_size, grid_size), dtype=cell_image.dtype)
+    window_height, window_width = cell_image.shape[1], cell_image.shape[2]
+    cell_image_resized[:, :window_height, :window_width] = cell_image
+
+    # Normalize the image
+    for channel in range(num_channels):
+        channel_image = cell_image_resized[channel]
         cell_min = channel_image.min()
         cell_max = channel_image.max()
         if cell_min != cell_max:
-            cell_image[channel] = (channel_image - cell_min) / (cell_max - cell_min) * 255
+            cell_image_resized[channel] = (channel_image - cell_min) / (cell_max - cell_min) * 255
         else:
-            cell_image[channel] = np.zeros_like(channel_image)
+            cell_image_resized[channel] = np.zeros_like(channel_image)
 
-    # Clip the values to 0-255 and convert to uint8
-    cell_image = np.clip(cell_image, 0, 255).astype(np.uint8)
-    
-    # Resize and normalize the image for the model
-    cell_image = tf.image.resize(cell_image.transpose(1, 2, 0), (IMG_HEIGHT, IMG_WIDTH))  # Resize to model input
-    cell_image = cell_image / 255.0  # Normalize
-    return np.expand_dims(cell_image, axis=0)
+    cell_image_resized = np.clip(cell_image_resized, 0, 255).astype(np.uint8)
+    cell_image_resized = tf.image.resize(cell_image_resized.transpose(1, 2, 0), (IMG_HEIGHT, IMG_WIDTH))
+    return np.expand_dims(cell_image_resized / 255.0, axis=0)
 
-
-# Save the stitched result with the original raster's spatial information
+# Function to write stitched result to a file
 def write_stitched_result(stitched_result, src, output_path):
     with rasterio.open(
         output_path,
@@ -175,17 +151,11 @@ def write_stitched_result(stitched_result, src, output_path):
     ) as dst:
         dst.write(stitched_result, 1)
 
-# Convert the thresholded raster to shapefile, but only keep rhododendron areas
+# Function to convert raster to shapefile
 def raster_to_shapefile(raster_array, transform, crs, shapefile_path):
     shapes_gen = shapes(raster_array, transform=transform)
+    schema = {'geometry': 'Polygon', 'properties': {'class': 'int'}}
 
-    # Prepare shapefile schema
-    schema = {
-        'geometry': 'Polygon',
-        'properties': {'class': 'int'}
-    }
-
-    # Write to shapefile, but only include shapes with value 1 (rhododendron presence)
     with fiona.open(shapefile_path, 'w', 'ESRI Shapefile', schema=schema, crs=from_epsg(crs)) as shp:
         for geom, value in shapes_gen:
             if int(value) == 1:  # Only write shapes for rhododendron areas
@@ -194,24 +164,22 @@ def raster_to_shapefile(raster_array, transform, crs, shapefile_path):
                     'properties': {'class': 1}  # Class 1 for rhododendron
                 })
 
-# Display the shapefile using Tkinter
+# Function to display the shapefile
 def display_shapefile(shapefile_path):
-    root = tk.Tk()
-    root.title("Shapefile Viewer")
-
-    # Load the shapefile
     gdf = gpd.read_file(shapefile_path)
-
-    # Plot the shapefile
     fig, ax = plt.subplots()
     gdf.plot(ax=ax, color='blue')
-
-    # Display it in a Tkinter window
     canvas = FigureCanvasTkAgg(fig, master=root)
     canvas.draw()
-    canvas.get_tk_widget().pack(side=tk.TOP, fill=tk.BOTH, expand=1)
+    canvas.get_tk_widget().pack(side=tk.TOP, fill=tk.BOTH, expand=True)
 
-    root.mainloop()
+# Run the inference process in a separate thread to avoid freezing the UI
+def run_inference():
+    threading.Thread(target=process_and_inference_raster).start()
 
-# Run the raster processing and inference
-process_and_inference_raster()
+# Add a button to start the process
+start_button = ttk.Button(frame, text="Start Inference", command=run_inference)
+start_button.pack(pady=10)
+
+# Start the Tkinter event loop
+root.mainloop()
