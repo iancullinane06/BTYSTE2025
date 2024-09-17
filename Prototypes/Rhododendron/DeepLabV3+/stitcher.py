@@ -158,21 +158,29 @@ class InferenceThread(QThread):
             dst.write(stitched_result, 1)
 
     def raster_to_shapefile(self, raster_array, transform, crs, shapefile_path):
+        # Check if crs is valid and extract the EPSG code, else fallback to CRS WKT or other format
+        epsg_code = crs if isinstance(crs, int) else crs.to_epsg()
+
+        if epsg_code is None:
+            # If no EPSG is available, use the CRS WKT string
+            fiona_crs = crs.to_wkt()
+        else:
+            fiona_crs = from_epsg(epsg_code)
+
         shapes_gen = shapes(raster_array, transform=transform)
-        # Prepare shapefile schema
         schema = {
             'geometry': 'Polygon',
             'properties': {'class': 'int'}
         }
 
-        # Write to shapefile, but only include shapes with value 1 (rhododendron presence)
-        with fiona.open(shapefile_path, 'w', 'ESRI Shapefile', schema=schema, crs=from_epsg(crs)) as shp:
+        with fiona.open(shapefile_path, 'w', 'ESRI Shapefile', schema=schema, crs=fiona_crs) as shp:
             for geom, value in shapes_gen:
-                if int(value) == 1:  # Only write shapes for rhododendron areas
+                if int(value) == 1:  # Only write shapes for rhododendron presence
                     shp.write({
                         'geometry': mapping(shape(geom)),
-                        'properties': {'class': 1}  # Class 1 for rhododendron
+                        'properties': {'class': 1}
                     })
+
 
 class MainWindow(QMainWindow):
     def __init__(self):
