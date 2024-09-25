@@ -5,7 +5,6 @@ import rasterio
 import geopandas as gpd
 import tensorflow as tf
 from keras.models import load_model
-from dotenv import load_dotenv
 from rasterio.windows import Window
 from rasterio.features import shapes
 import fiona
@@ -13,33 +12,24 @@ from fiona.crs import from_epsg
 from shapely.geometry import shape, mapping
 from PyQt5.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
                              QSlider, QFileDialog, QProgressBar, QMessageBox, QSizePolicy)
-
 from PyQt5.QtCore import Qt, QSize, QThread, pyqtSignal, QTimer
-from PyQt5.QtGui import QPixmap, QImage, QIcon
+from PyQt5.QtGui import QPixmap, QIcon
 import matplotlib.pyplot as plt
 
-# Load environment variables
-load_dotenv()
-
-# Directories and model path
-data_dir = os.getenv('RHODODENDRON-DATASET-PRESPLIT')
-out_dir = os.getenv('RHODODENDRON-DATASET-OUTPUT')
-model_path = os.getenv('RHODODENDRON-DEEPLAB-MODEL')
-
-# Paths to raster and shapefile
-raster_path = os.path.join(data_dir, 'Coillte_Multispectral.tif')
-output_dir = os.path.join(out_dir, 'inferenced')
-
-accent_colour = "#00adfe"
-threshold = 0.5
-selected_shapefile = None
-
-# Create output directory if it doesn't exist
-os.makedirs(output_dir, exist_ok=True)
 
 # Parameters
 IMG_HEIGHT, IMG_WIDTH, IMG_CHANNELS = 244, 244, 6
 grid_size = 244
+threshold = 0.5
+selected_shapefile = None
+model_path = None  # This will be set dynamically from file dialog
+accent_colour = "#00adfe"
+
+output_dir = os.path.join('inferenced')
+
+# Create output directory if it doesn't exist
+os.makedirs(output_dir, exist_ok=True)
+
 
 def dice_coefficient(y_true, y_pred, smooth=1):
     """
@@ -98,8 +88,9 @@ def combined_loss(y_true, y_pred):
     """
     return dice_loss(y_true, y_pred) + tf.keras.losses.binary_crossentropy(y_true, y_pred)
 
-# Load the model
-model = load_model(model_path, custom_objects={
+
+def load_model_with_custom_objects(model_path):
+    return load_model(model_path, custom_objects={
     'combined_loss': combined_loss,
     'dice_coefficient': dice_coefficient,
     'f2_score': f2_score,
@@ -268,25 +259,25 @@ class MainWindow(QMainWindow):
 
         # Logo and description
         logo_label = QLabel()
-        pixmap = QPixmap(os.getenv('ECOLYTIX-LOGO'))  # Replace with your logo path
+        pixmap = QPixmap('assets/logo.png')  # Path to your logo (relative)
         logo_label.setPixmap(pixmap.scaled(QSize(400, 100), Qt.KeepAspectRatio))
         left_layout.addWidget(logo_label)
 
-        description_label = QLabel("This application performs inference on a raster dataset and converts the output to a shapefile. Use the 'Select Shapefile' button to choose a shapefile for processing, adjust the threshold slider, and click 'Start Inference' to begin. The progress will be displayed at the bottom.")
+        description_label = QLabel("This application performs inference on a raster dataset ...")
         description_label.setStyleSheet("color: white;")
-        description_label.setWordWrap(True)  # Enable text wrapping
+        description_label.setWordWrap(True)
         left_layout.addWidget(description_label)
 
-        # Parameters
+        # Threshold slider
         threshold_label = QLabel("Threshold:")
         threshold_label.setStyleSheet("color: white;")
         left_layout.addWidget(threshold_label)
 
-        # Threshold slider (snaps to 0.1 intervals)
         self.threshold_slider = QSlider(Qt.Horizontal)
         self.threshold_slider.setRange(0, 10)
         self.threshold_slider.setValue(5)
-        self.threshold_slider.setStyleSheet("QSlider::groove:horizontal { background: #555; height: 10px; } QSlider::handle:horizontal { background: "+accent_colour+"; border-radius: 5px; width: 15px; height: 15px; }")
+        self.threshold_slider.setStyleSheet(f"QSlider::groove:horizontal {{ background: #555; height: 10px; }} "
+                                             f"QSlider::handle:horizontal {{ background: {accent_colour}; border-radius: 5px; width: 15px; height: 15px; }}")
         self.threshold_slider.valueChanged.connect(self.update_threshold_label)
         left_layout.addWidget(self.threshold_slider)
 
@@ -296,13 +287,19 @@ class MainWindow(QMainWindow):
 
         # Shapefile button
         shapefile_button = QPushButton("Select Shapefile")
-        shapefile_button.setStyleSheet("background-color: "+accent_colour+"; color: white; border-radius: 5px; padding: 5px; width: 50%;")
+        shapefile_button.setStyleSheet(f"background-color: {accent_colour}; color: white; border-radius: 5px; padding: 5px; width: 50%;")
         shapefile_button.clicked.connect(self.open_shapefile)
         left_layout.addWidget(shapefile_button)
 
+        # Model selection button
+        model_button = QPushButton("Select Model")
+        model_button.setStyleSheet(f"background-color: {accent_colour}; color: white; border-radius: 5px; padding: 5px; width: 50%;")
+        model_button.clicked.connect(self.select_model)
+        left_layout.addWidget(model_button)
+
         # Start inference button
         start_button = QPushButton("Start Inference")
-        start_button.setStyleSheet("background-color: "+accent_colour+"; color: white; border-radius: 5px; padding: 5px; width: 50%;")
+        start_button.setStyleSheet(f"background-color: {accent_colour}; color: white; border-radius: 5px; padding: 5px; width: 50%;")
         start_button.clicked.connect(self.run_inference)
         left_layout.addWidget(start_button)
 
@@ -316,38 +313,10 @@ class MainWindow(QMainWindow):
         self.preview_label.setStyleSheet("color: white; font-size: 20px;")
         self.right_layout.addWidget(self.preview_label)
 
-        # Bottom frame layout
-        self.bottom_frame = QWidget()
-        self.bottom_frame.setStyleSheet("background-color: #333; border-radius: 10px;")
-        bottom_layout = QHBoxLayout()
-        self.bottom_frame.setLayout(bottom_layout)
-        self.bottom_frame.setFixedHeight(40)
-        self.bottom_frame.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
-        main_layout.addWidget(self.bottom_frame)
-
-        # Progress bar
+        # Bottom frame with progress bar
         self.progress_bar = QProgressBar()
-        self.progress_bar.setStyleSheet("QProgressBar { border-radius: 5px; background: #555; } QProgressBar::chunk { background: "+accent_colour+"; }")
-        self.progress_bar.setFixedHeight(20)
-        self.progress_bar.setValue(0)
-
-        # Percentage and ETA label
-        self.percentage_label = QLabel("0%")
-        self.percentage_label.setStyleSheet("color: white;")
-
-        self.eta_label = QLabel("ETA: Calculating...")
-        self.eta_label.setStyleSheet("color: white;")
-
-        bottom_layout.addWidget(self.progress_bar)
-        bottom_layout.addWidget(self.percentage_label)
-        bottom_layout.addWidget(self.eta_label)
-
-        # Set custom window icon
-        self.setWindowIcon(QIcon(os.getenv('ECOLYTIX-LOGO-ICON')))  # Replace with your actual icon path
-        
-        # Timer to simulate ETA and update
-        self.timer = QTimer(self)
-        self.timer.timeout.connect(self.update_eta)
+        self.progress_bar.setStyleSheet(f"QProgressBar {{ border-radius: 5px; background: #555; }} QProgressBar::chunk {{ background: {accent_colour}; }}")
+        main_layout.addWidget(self.progress_bar)
 
     def update_threshold_label(self):
         """Update the threshold value displayed."""
@@ -364,71 +333,21 @@ class MainWindow(QMainWindow):
             selected_shapefile = file_path
             self.update_file_indicator(True)
 
-    def run_inference(self):
-        """Start inference process."""
-        if not selected_shapefile:
-            QMessageBox.warning(self, "No Shapefile Selected", "Please select a shapefile before starting inference.")
-            return
-        threshold = self.threshold_slider.value() / 10.0
-        self.inference_thread = InferenceThread(raster_path, output_dir, threshold, model)
-        self.inference_thread.progress_update.connect(self.update_progress)
-        self.inference_thread.eta_update.connect(self.update_eta)
-        self.inference_thread.shapefile_update.connect(self.update_shapefile_preview)
-        self.inference_thread.start()
-        # Start updating the progress bar and ETA
-        self.progress_bar.setValue(0)
-        self.eta_label.setText("ETA: Starting... Please wait, this might take a while.")
-        self.timer.start(1000)  # Update every second (this is just an example)
+    def select_model(self):
+        file_dialog = QFileDialog()
+        model_file, _ = file_dialog.getOpenFileName(self, "Select Model", "", "Model Files (*.h5)")
+        if model_file:
+            global model_path
+            model_path = model_file
+            QMessageBox.information(self, "Model Loaded", f"Model selected: {os.path.basename(model_file)}")
 
-    def update_progress(self, progress):
-        """Update the progress bar and percentage label."""
-        self.progress_bar.setValue(progress)
-        self.percentage_label.setText(f"{progress}%")
 
-    def update_eta(self):
-        """Simulate progress and update the ETA display."""
-        current_value = self.progress_bar.value()
-        if current_value < 100:
-            eta_seconds = (100 - current_value) * 1  # Simulate ETA
-            self.eta_label.setText(f"ETA: {eta_seconds} seconds remaining.")
-        else:
-            self.timer.stop()
-            self.eta_label.setText("Inference Complete!")
-            print("Inference done.")
 
-    def update_file_indicator(self, file_selected):
-        """Change preview label when a file is selected."""
-        if file_selected:
-            self.preview_label.setText("File Selected")
-            self.preview_label.setStyleSheet("color: #e63946; font-size: 20px;")
-        else:
-            self.preview_label.setText("Preview")
-            self.preview_label.setStyleSheet("color: white; font-size: 20px;")
-
-    def update_shapefile_preview(self, shapefile_path):
-        """Display shapefile preview."""
-        gdf = gpd.read_file(shapefile_path)
-        fig, ax = plt.subplots()
-        gdf.plot(ax=ax, color='blue')
-        plt.close(fig)
-        img = self.fig2img(fig)
-        self.display_image(img)
-
-    def display_image(self, img):
-        """Display the image in the right frame."""
-        q_image = QImage(img, img.shape[1], img.shape[0], img.strides[0], QImage.Format_RGB888)
-        pixmap = QPixmap.fromImage(q_image)
-        self.preview_label.setPixmap(pixmap.scaled(self.preview_label.size(), Qt.KeepAspectRatio))
-
-    def fig2img(self, fig):
-        """Convert Matplotlib figure to NumPy image."""
-        fig.canvas.draw()
-        img = np.frombuffer(fig.canvas.buffer_rgba(), dtype=np.uint8)
-        img = img.reshape(fig.canvas.get_width_height()[::-1] + (4,))
-        return img
-
-if __name__ == '__main__':
+def main():
     app = QApplication(sys.argv)
     window = MainWindow()
     window.show()
     sys.exit(app.exec_())
+
+if __name__ == "__main__":
+    main()
