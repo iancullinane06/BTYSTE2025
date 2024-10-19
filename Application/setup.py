@@ -1,6 +1,6 @@
 from setuptools import setup, find_packages
 import sys
-sys.setrecursionlimit(1500)
+sys.setrecursionlimit(20)
 from cx_Freeze import setup, Executable
 
 # Define the base for the executable
