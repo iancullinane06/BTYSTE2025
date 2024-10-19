@@ -1,0 +1,16 @@
+{
+    "name": "electron-flask-app",
+    "version": "1.0.0",
+    "main": "main.js",
+    "scripts": {
+      "start": "electron .",
+      "dev": "nodemon --exec python app.py"
+    },
+    "dependencies": {
+      "electron": "^24.0.0"
+    },
+    "devDependencies": {
+      "nodemon": "^2.0.0"
+    }
+  }
+  
