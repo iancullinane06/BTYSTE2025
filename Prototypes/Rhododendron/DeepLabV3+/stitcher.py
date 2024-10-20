@@ -1,7 +1,7 @@
 import sys
 import os
 
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', '..')))
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..')))
 from EcoLytix.Packages import *
 
 import time
@@ -13,6 +13,7 @@ from keras.models import load_model
 from dotenv import load_dotenv
 from rasterio.windows import Window
 from rasterio.features import shapes
+from rasterio.plot import show 
 import fiona
 from fiona.crs import from_epsg
 from shapely.geometry import shape, mapping
@@ -22,6 +23,8 @@ from PyQt5.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, QH
 from PyQt5.QtCore import Qt, QSize, QThread, pyqtSignal, QTimer
 from PyQt5.QtGui import QPixmap, QImage, QIcon
 import matplotlib.pyplot as plt
+from matplotlib.patches import Rectangle
+import datetime
 
 # Load environment variables
 load_dotenv()
@@ -68,6 +71,7 @@ class InferenceThread(QThread):
         self.model = model
 
     def run(self):
+        start_time = time.time()  # Store the start time
         with rasterio.open(self.raster_path) as src:
             crs = src.crs
             transform = src.transform
@@ -84,22 +88,22 @@ class InferenceThread(QThread):
                     window = Window(i, j, window_width, window_height)
                     cell_image = src.read(window=window)
 
-                    # Preprocess and run inference
                     processed_image = self.preprocess_image(cell_image)
                     prediction = self.model.predict(processed_image)[0].squeeze()
                     binary_prediction = (prediction >= self.threshold).astype(int)
 
-                    # Update stitched result
                     stitched_result[j:j+window_height, i:i+window_width] = binary_prediction[:window_height, :window_width]
 
-                    # Update progress
                     current_step += 1
                     progress = int((current_step / num_steps) * 100)
                     self.progress_update.emit(progress)
-                    self.eta_update.emit("ETA: Calculating...")  # Placeholder for ETA
 
-                    # Emit shapefile update periodically
-                    if current_step % (num_steps // 10) == 0:  # Update every 10% progress
+                    elapsed_time = time.time() - start_time
+                    estimated_total_time = (elapsed_time / current_step) * num_steps
+                    eta = estimated_total_time - elapsed_time
+                    self.eta_update.emit(str(datetime.timedelta(seconds=int(eta))))  # Format ETA nicely
+
+                    if current_step % (num_steps // 10) == 0:
                         self.save_and_emit_shapefile(stitched_result, src)
 
             # Final save
@@ -117,11 +121,34 @@ class InferenceThread(QThread):
 
     def display_shapefile(self, shapefile_path):
         gdf = gpd.read_file(shapefile_path)
-        fig, ax = plt.subplots()
-        gdf.plot(ax=ax, color='blue')
-        plt.close(fig)
-        img = self.fig2img(fig)
-        self.display_image(img)
+        
+        # Load the raster input for background
+        with rasterio.open(self.raster_path) as src:
+            fig, ax = plt.subplots()
+            raster_data = src.read(1)  # Read the first band
+            show(src, ax=ax, cmap='gray')  # Show the raster image
+
+            # Overlay the predicted shapefile
+            gdf.plot(ax=ax, color=accent_colour, alpha=0.5)  # Adjust transparency here
+
+            plt.close(fig)
+            img = self.fig2img(fig)
+            self.display_image(img)
+                
+    def display_prediction_area(self, i, j, window_width, window_height):
+        """Draw a rectangle to highlight the area being processed."""
+        with rasterio.open(self.raster_path) as src:
+            fig, ax = plt.subplots()
+            raster_data = src.read(1)
+            show(src, ax=ax, cmap='gray')
+
+            # Add rectangle patch to indicate the current window being processed
+            rect = Rectangle((i, j), window_width, window_height, linewidth=2, edgecolor=accent_colour, facecolor='none')
+            ax.add_patch(rect)
+
+            plt.close(fig)
+            img = self.fig2img(fig)
+            self.display_image(img)
         
     def preprocess_image(self, cell_image):
         num_channels = cell_image.shape[0]

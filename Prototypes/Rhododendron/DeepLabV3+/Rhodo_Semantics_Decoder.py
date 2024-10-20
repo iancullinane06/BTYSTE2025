@@ -14,7 +14,7 @@ from keras.utils import Sequence
 import tifffile as tiff
 import tensorflow as tf
 from keras import optimizers
-from keras.layers import Input, Conv2D, DepthwiseConv2D, GlobalAveragePooling2D, BatchNormalization, Activation, UpSampling2D, Reshape, Concatenate, Dropout
+from keras.layers import Input, Conv2D, GlobalAveragePooling2D, BatchNormalization, Activation, UpSampling2D, Reshape, Concatenate, Dropout
 from keras.models import Model
 from keras.applications import DenseNet121
 from keras.regularizers import l2
@@ -28,8 +28,8 @@ IMG_HEIGHT = 244
 IMG_WIDTH = 244
 IMG_CHANNELS = 6
 BATCH_SIZE = 8
-EPOCHS = 100
-LEARNING_RATE = 1e-2
+EPOCHS = 250
+LEARNING_RATE = 1e-3
 LOG_DIR = os.getenv('LOG_DIR', "./.logs/Rhodo-semantics-plus/" + datetime.datetime.now().strftime("%Y%m%d-%H%M%S"))
 
 data_dir = os.getenv('RHODODENDRON-DATASET')
@@ -49,6 +49,8 @@ def augment_image(image, mask):
         image = tf.image.random_brightness(image, max_delta=0.1)
     if np.random.rand() > 0.5:
         image = tf.image.random_contrast(image, lower=0.9, upper=1.1)
+    if np.random.rand() > 0.5:
+         image = tf.image.random_crop(image, size=[IMG_HEIGHT, IMG_WIDTH, IMG_CHANNELS])
     return image, mask
 
 def normalize_image(image):
@@ -195,14 +197,14 @@ def ASPP_module(x):
     # Global Average Pooling
     aspp5 = GlobalAveragePooling2D()(x)
     aspp5 = Reshape((1, 1, aspp5.shape[-1]))(aspp5)
-    aspp5 = Conv2D(256, (1, 1), padding='same', use_bias=False)(aspp5)
+    aspp5 = Conv2D(256, (1, 1), padding='same', use_bias=False, kernel_regularizer=l2(0.001))(aspp5)
     aspp5 = BatchNormalization()(aspp5)
     aspp5 = Activation('relu')(aspp5)
     aspp5 = UpSampling2D(size=(x.shape[1], x.shape[2]), interpolation='bilinear')(aspp5)
 
     # Concatenate ASPP outputs
     x = Concatenate(axis=-1)([aspp1, aspp2, aspp3, aspp4, aspp5])
-    x = Conv2D(256, (1, 1), padding='same', use_bias=False)(x)
+    x = Conv2D(256, (1, 1), padding='same', use_bias=False, kernel_regularizer=l2(0.001))(x)
     x = BatchNormalization()(x)
     x = Activation('relu')(x)
 
@@ -246,7 +248,7 @@ def DeepLabV3Plus(input_shape, num_classes=1):
     x = BatchNormalization()(x)
     x = Activation("relu")(x)
     
-    x = Dropout(0.2)(x)
+    x = Dropout(0.1)(x)
 
     # Final upsampling to the original image size
     final_upsample_size = (input_shape[0], input_shape[1])
@@ -261,21 +263,22 @@ def DeepLabV3Plus(input_shape, num_classes=1):
 # Create the model
 model = DeepLabV3Plus(input_shape=(IMG_HEIGHT, IMG_WIDTH, IMG_CHANNELS), num_classes=1)
 
-model.compile(optimizer=optimizers.SGD(learning_rate=LEARNING_RATE),
+model.compile(optimizer=optimizers.Adam(learning_rate=LEARNING_RATE),
               loss=combined_loss,
               metrics=[dice_coefficient, f2_score, pixel_accuracy, mean_iou])
 
-# Callbacks
-early_stopping = tf.keras.callbacks.EarlyStopping(monitor='val_loss', patience=25, restore_best_weights=True, verbose=1)
-lr_scheduler = tf.keras.callbacks.ReduceLROnPlateau(monitor='val_loss', factor=0.2, patience=20, min_lr=1e-6, verbose=1)
-tensorboard_callback = tf.keras.callbacks.TensorBoard(log_dir=LOG_DIR, histogram_freq=1)
+callbacks = [
+    tf.keras.callbacks.EarlyStopping(monitor='val_loss', patience=30, restore_best_weights=True, verbose=1),
+    tf.keras.callbacks.ReduceLROnPlateau(monitor='val_loss', factor=0.2, patience=15, min_lr=1e-6, verbose=1),
+    tf.keras.callbacks.ModelCheckpoint(filepath=os.path.join(LOG_DIR, 'model.h5'), save_best_only=True),
+    tf.keras.callbacks.TensorBoard(log_dir=LOG_DIR),
+]
 
-# Train the model
 history = model.fit(
     train_generator,
     epochs=EPOCHS,
     validation_data=validation_generator,
-    callbacks=[early_stopping, lr_scheduler, tensorboard_callback]
+    callbacks=callbacks
 )
 
 def plot_history(history):
