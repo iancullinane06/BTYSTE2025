@@ -18,3 +18,5 @@
 __pycache__/
 
 build
+
+Application/assets/Model/DLV3+-model.h5
