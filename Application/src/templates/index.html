@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Your Application</title>
+    <link rel="stylesheet" type="text/css" href="{{ url_for('static', filename='styles.css') }}">
+</head>
+<body>
+    <div class="container">
+        <div class="editing-box">
+            <ul class="tabs">
+                <button class="tablinks active" data-tab="properties" onclick="openTab(event, 'properties')">Properties</button>
+                <button class="tablinks" data-tab="analysis" onclick="openTab(event, 'analysis')">Analysis</button>
+                <button class="tablinks" data-tab="inference" onclick="openTab(event, 'inference')">Inference</button>
+            </ul>
+            
+            <div class="tab-content">
+                <div id="properties" class="tab-pane active">
+                    <h2>Properties</h2>
+                    <p>Name: <span id="layer-name">No file selected</span></p>
+                    <p>Location: <span id="layer-location">N/A</span></p>
+                    <p>Area: <span id="layer-area">N/A</span></p>
+                    <p>Color Histogram: <span id="color-histogram">N/A</span></p>
+                </div>
+                <div id="analysis" class="tab-pane">
+                    <h2>Analysis</h2>
+                    <button id="calculate-ndvi">Calculate NDVI</button>
+                    <button id="calculate-ndre">Calculate NDRE</button>
+                    <p>Number of Rhododendron Plants: <span id="plant-count">0</span></p>
+                </div>
+                <div id="inference" class="tab-pane">
+                    <h2>Inference</h2>
+                    <button id="run-inference">Run Inference</button>
+                    <button id="build-vector" disabled>Build Vector Map</button>
+                </div>
+            </div>
+        </div>
+        <div class="visual-box">
+            <canvas id="raster-canvas"></canvas>
+            <!-- Additional layers will be added here -->
+        </div>
+    </div>
+    <script src="{{ url_for('static', filename='script.js') }}"></script>
+    <script src="{{ url_for('static', filename='renderer.js') }}"></script>        
+</body>
+</html>

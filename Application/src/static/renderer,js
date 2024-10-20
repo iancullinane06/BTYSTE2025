@@ -1,0 +1,30 @@
+const { ipcRenderer } = require('electron');
+
+// Handle file-opened event and display the raster image
+ipcRenderer.on('file-opened', (event, fileData) => {
+    const rasterData = processFileData(fileData);  // Load image data
+    displayRaster(rasterData);  // Display it in the app
+});
+
+// Request selected layer to save
+ipcRenderer.on('get-selected-layer', () => {
+    const selectedLayer = getSelectedLayer();  // Function to get the selected layer data
+    ipcRenderer.send('save-selected-layer', selectedLayer);  // Send it back to main process
+});
+
+// Request all layers to save
+ipcRenderer.on('get-all-layers', () => {
+    const allLayers = getAllLayers();  // Function to get all layers data
+    ipcRenderer.send('save-all-layers', allLayers);  // Send all layers to main process
+});
+
+// Function to process the file data (e.g., a TIFF file)
+function processFileData(fileData) {
+    // Handle the image data (e.g., decoding TIFF)
+    return fileData;
+}
+
+// Function to display the raster image
+function displayRaster(rasterData) {
+    // Render the raster image visually in your app
+}
