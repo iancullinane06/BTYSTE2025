@@ -4,10 +4,12 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Your Application</title>
+    <link rel="icon" href="{{ url_for('static', filename='EcoLytix-icon.ico') }}">
     <link rel="stylesheet" type="text/css" href="{{ url_for('static', filename='styles.css') }}">
 </head>
 <body>
     <div class="container">
+        <div class="left">
         <div class="editing-box">
             <ul class="tabs">
                 <button class="tablinks active" data-tab="properties" onclick="openTab(event, 'properties')">Properties</button>
@@ -25,22 +27,39 @@
                 </div>
                 <div id="analysis" class="tab-pane">
                     <h2>Analysis</h2>
-                    <button id="calculate-ndvi">Calculate NDVI</button>
-                    <button id="calculate-ndre">Calculate NDRE</button>
+                    <button id="calculate-ndvi" disabled>Calculate NDVI</button>
+                    <br>
+                    <button id="calculate-ndre" disabled>Calculate NDRE</button>
                     <p>Number of Rhododendron Plants: <span id="plant-count">0</span></p>
                 </div>
                 <div id="inference" class="tab-pane">
                     <h2>Inference</h2>
                     <button id="run-inference">Run Inference</button>
+                    <br>
                     <button id="build-vector" disabled>Build Vector Map</button>
                 </div>
             </div>
         </div>
-        <div class="visual-box">
-            <canvas id="raster-canvas"></canvas>
-            <!-- Additional layers will be added here -->
+        <div class="logo">
+            <img src="{{url_for('static', filename='EcoLytix-icon.ico')}}">
         </div>
     </div>
+        <div class="visual-box">
+            <input type="file" id="fileInput" style="display: none;" />
+            <button id="uploadButton">Upload Image</button>
+            <div id="uploadStatus"></div>
+            <canvas id="raster-canvas" width="800" height="600"></canvas>
+        </div>
+    </div>
+    <script>
+        // Send data to the main process
+        window.api.send("toMain", "Hello from Renderer");
+    
+        // Receive data from the main process
+        window.api.receive("fromMain", (data) => {
+            console.log(`Received data from main process: ${data}`);
+        });
+      </script>
     <script src="{{ url_for('static', filename='script.js') }}"></script>
     <script src="{{ url_for('static', filename='renderer.js') }}"></script>        
 </body>

@@ -1,83 +1,86 @@
-// script.js
-const { remote } = require('electron');
-const { dialog } = remote;
-const fs = require('fs');
-
-const openFileButton = document.getElementById('open-file');
+// Accessing GeoTIFF from the global scope
 const rasterCanvas = document.getElementById('raster-canvas');
 const layerName = document.getElementById('layer-name');
 const uploadButton = document.getElementById("uploadButton");
 const fileInput = document.getElementById("fileInput");
+const uploadStatus = document.getElementById("uploadStatus");
 
-// Open file dialog to select an image
-openFileButton.addEventListener('click', async () => {
-    const result = await dialog.showOpenDialog({
-        properties: ['openFile'],
-        filters: [
-            { name: 'Images', extensions: ['png', 'jpg', 'jpeg', 'tiff'] },
-        ],
-    });
+// Handle file input change event
+fileInput.addEventListener('change', async (event) => {
+    const file = event.target.files[0];
+    if (file) {
+        const filePath = URL.createObjectURL(file);
+        uploadStatus.innerText = `File selected: ${file.name}`;
+        uploadButton.style.display = "none"; // Hide upload button
+        layerName.textContent = file.name;
 
-    if (!result.canceled) {
-        const filePath = result.filePaths[0];
-        loadImage(filePath);
+        // Use GeoTIFF to load the raster file and extract channels
+        const tiff = await window.GeoTIFF.fromUrl(filePath);
+        const image = await tiff.getImage();
+        const width = image.getWidth();
+        const height = image.getHeight();
+
+        // Assuming you have 6 color channels in the file
+        const channels = [];
+        for (let i = 0; i < 6; i++) {
+            channels.push(await image.readRasters({ samples: [i] }));
+        }
+
+        drawChannelsAsLayers(channels, width, height);
+    } else {
+        uploadStatus.innerText = 'No file selected.';
     }
 });
 
-// Load and display the selected image
-function loadImage(filePath) {
-    const img = new Image();
-    img.src = filePath;
-    img.onload = () => {
-        const ctx = rasterCanvas.getContext('2d');
-        rasterCanvas.width = img.width;
-        rasterCanvas.height = img.height;
-        ctx.drawImage(img, 0, 0);
-        layerName.textContent = filePath.split('/').pop(); // Set layer name to the file name
-    };
+// Function to draw each channel as a separate colored layer
+function drawChannelsAsLayers(channels, width, height) {
+    const ctx = rasterCanvas.getContext('2d');
+    rasterCanvas.width = width;
+    rasterCanvas.height = height;
+
+    // Clear the canvas
+    ctx.clearRect(0, 0, rasterCanvas.width, rasterCanvas.height);
+
+    // Define color for each channel
+    const colors = [
+        'rgba(255, 0, 0, 0.5)',   // Red for channel 1
+        'rgba(0, 255, 0, 0.5)',   // Green for channel 2
+        'rgba(0, 0, 255, 0.5)',   // Blue for channel 3
+        'rgba(255, 255, 0, 0.5)', // Yellow for channel 4
+        'rgba(0, 255, 255, 0.5)', // Cyan for channel 5
+        'rgba(255, 0, 255, 0.5)'  // Magenta for channel 6
+    ];
+
+    // Loop over each channel and draw it
+    for (let i = 0; i < channels.length; i++) {
+        drawSingleChannel(ctx, channels[i], width, height, colors[i]);
+    }
 }
 
-// Implement tab switching logic
-document.querySelectorAll('.tablinks').forEach(tab => {
-    tab.addEventListener('click', () => {
-        document.querySelectorAll('.tablinks').forEach(t => {
-            t.classList.remove('active');
-            t.classList.remove('selected'); // Reset selected class
-        });
-        document.querySelectorAll('.tab-pane').forEach(pane => pane.classList.remove('active'));
-        
-        tab.classList.add('active');
-        tab.classList.add('selected'); // Add selected class
-        const tabName = tab.getAttribute('data-tab');
-        document.getElementById(tabName).classList.add('active');
-    });
-});
-
-// Upload image function
-uploadButton.addEventListener("click", function () {
-    const file = fileInput.files[0];
-
-    if (file) {
-        const formData = new FormData();
-        formData.append("file", file);
-
-        // Load image and display it
-        fetch("/load_image", {
-            method: "POST",
-            body: formData
-        })
-            .then(response => response.json())
-            .then(data => {
-                if (data.status) {
-                    const imgElement = document.getElementById("uploadedImage");
-                    imgElement.src = URL.createObjectURL(file);
-                    document.getElementById("imageContainer").style.display = "block";
-                } else {
-                    alert(data.error);
-                }
-            })
-            .catch(error => console.error("Error loading image:", error));
+// Function to draw a single channel with a specific color
+function drawSingleChannel(ctx, channelData, width, height, color) {
+    const imageData = ctx.createImageData(width, height);
+    for (let i = 0; i < channelData.length; i++) {
+        const value = channelData[i]; // Get channel pixel value
+        // Set each channel to grayscale or color based on the value
+        imageData.data[4 * i] = value;   // Red channel
+        imageData.data[4 * i + 1] = value; // Green channel
+        imageData.data[4 * i + 2] = value; // Blue channel
+        imageData.data[4 * i + 3] = 255; // Full opacity
     }
+
+    // Apply color overlay
+    ctx.globalCompositeOperation = 'source-over';
+    ctx.putImageData(imageData, 0, 0);
+
+    // Apply tint (color) over the channel
+    ctx.fillStyle = color;
+    ctx.fillRect(0, 0, width, height);
+}
+
+// Simulate file upload
+uploadButton.addEventListener('click', () => {
+    fileInput.click(); // Trigger file input click
 });
 
 // Tab open function
@@ -98,6 +101,5 @@ function openTab(evt, tabName) {
     document.getElementById(tabName).style.display = "block"; // Show the selected tab
     evt.currentTarget.className += " active"; // Add "active" class to the clicked tab
 }
-
 
 // Additional functions for NDVI/NDRE, inference, and saving layers...

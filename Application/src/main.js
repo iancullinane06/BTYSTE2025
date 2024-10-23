@@ -1,68 +1,48 @@
 const { app, BrowserWindow, Menu, ipcMain, dialog } = require('electron');
-const fs = require('fs');
+const fs = require('fs').promises; // Use promises for asynchronous file operations
 const path = require('path');
-const { spawn } = require('child_process');
 
-let mainWindow;
+let mainWindow
 
 function createWindow() {
     mainWindow = new BrowserWindow({
-        width: 1200,
+        width: 964,
         height: 800,
         webPreferences: {
             preload: path.join(__dirname, 'preload.js'),
-            nodeIntegration: true,
-            contextIsolation: false,
-            enableRemoteModule: true
+            contextIsolation: true,
+            enableRemoteModule: false,
+            nodeIntegration: false
         }
     });
-    mainWindow.loadFile(path.join(__dirname, 'templates', 'index.html'));
-    
+    mainWindow.loadURL('http://localhost:5000');
+    mainWindow.webContents.openDevTools();
+
     // Build menu with file options
     const menu = Menu.buildFromTemplate([
         {
             label: 'File',
             submenu: [
-                {
-                    label: 'Open Image',
-                    click: () => {
-                        openFile();
-                    }
-                },
-                {
-                    label: 'Save Selected Layer',
-                    click: () => {
-                        saveSelectedLayer();
-                    }
-                },
-                {
-                    label: 'Save All Layers',
-                    click: () => {
-                        saveAllLayers();
-                    }
-                }
+                { label: 'Open Image', click: openFile },
+                { label: 'Save Selected Layer', click: saveSelectedLayer },
+                { label: 'Save All Layers', click: saveAllLayers }
             ]
         }
     ]);
-    
-    // Set the menu to the application
     Menu.setApplicationMenu(menu);
 }
 
 // Function to handle file opening
-function openFile() {
-    dialog.showOpenDialog(mainWindow, {
+async function openFile() {
+    const result = await dialog.showOpenDialog(mainWindow, {
         properties: ['openFile'],
         filters: [{ name: 'Images', extensions: ['tif', 'tiff', 'png', 'jpg', 'jpeg'] }]
-    }).then(result => {
-        if (!result.canceled) {
-            const filePath = result.filePaths[0];
-            const fileData = fs.readFileSync(filePath);  // Load image data here
-            mainWindow.webContents.send('file-opened', fileData);  // Send image data to renderer
-        }
-    }).catch(err => {
-        console.error("Failed to open file: ", err);
     });
+    if (!result.canceled) {
+        const filePath = result.filePaths[0];
+        // Send the selected file path back to the renderer process
+        mainWindow.webContents.send('file-selected', filePath);
+    }
 }
 
 // Function to handle saving selected layer
@@ -75,40 +55,26 @@ function saveAllLayers() {
     mainWindow.webContents.send('get-all-layers');  // Request all layers from renderer
 }
 
-// Respond to renderer with selected layer to save
-ipcMain.on('save-selected-layer', (event, layerData) => {
-    dialog.showSaveDialog(mainWindow, {
-        filters: [{ name: 'TIFF', extensions: ['tiff'] }]
-    }).then(result => {
-        if (!result.canceled) {
-            fs.writeFileSync(result.filePath, layerData);  // Save the layer data to the file
-        }
-    }).catch(err => {
-        console.error("Failed to save layer: ", err);
-    });
-});
+app.whenReady().then(createWindow);
 
-// Respond to renderer with all layers to save
-ipcMain.on('save-all-layers', (event, layersData) => {
-    dialog.showSaveDialog(mainWindow, {
-        filters: [{ name: 'TIFF', extensions: ['tiff'] }]
-    }).then(result => {
-        if (!result.canceled) {
-            fs.writeFileSync(result.filePath, layersData);  // Save all layers to the file
-        }
-    }).catch(err => {
-        console.error("Failed to save all layers: ", err);
-    });
-});
-
-app.whenReady().then(() => {
-    createWindow();
-
-    app.on('activate', function () {
-        if (BrowserWindow.getAllWindows().length === 0) createWindow();
-    });
+app.on('activate', function () {
+    if (BrowserWindow.getAllWindows().length === 0) createWindow();
 });
 
 app.on('window-all-closed', function () {
     if (process.platform !== 'darwin') app.quit();
 });
+
+// Listen for IPC events in the main process
+ipcMain.on("toMain", (event, args) => {
+    fs.readFile("path/to/file", (error, data) => {
+      if (error) {
+        console.error("Error reading file:", error);
+        return;
+      }
+      // Send the response back to the renderer
+      win.webContents.send("fromMain", data.toString());
+    });
+  });
+
+// Add other IPC handlers as needed

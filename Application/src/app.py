@@ -5,6 +5,9 @@ import rasterio
 import tensorflow as tf
 from keras.models import load_model
 from dotenv import load_dotenv
+import base64
+import io
+from PIL import Image  # Ensure you have Pillow installed
 
 # Set parameters
 IMG_HEIGHT = 244
@@ -89,26 +92,54 @@ model = load_model(model_path, custom_objects={
 def index():
     return render_template('index.html')
 
+# Set a directory to save uploaded files
+UPLOAD_FOLDER = os.path.join(os.getenv('RHODODENDRON-DATASET-PRESPLIT'), 'Coillte_Multispectral.tif')
+app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
+
+@app.route('/upload', methods=['POST'])
+def upload_file():
+    if 'file' not in request.files:
+        return jsonify({'error': 'No file part'})
+    file = request.files['file']
+    if file.filename == '':
+        return jsonify({'error': 'No selected file'})
+    if file:
+        file_path = os.path.join(app.config['UPLOAD_FOLDER'], file.filename)
+        file.save(file_path)
+        return jsonify({'success': True, 'file_path': file_path})
+    
 @app.route('/load_image', methods=['POST'])
 def load_image():
-    # Check if a file was uploaded
+    print("Received request to load image.")  # Debug statement
     if 'file' not in request.files:
+        print("No file part in the request.")  # Debug statement
         return jsonify({"error": "No file part"}), 400
     
     file = request.files['file']
-    
-    # If the user does not select a file, the browser may submit an empty part without a filename
     if file.filename == '':
+        print("No selected file.")  # Debug statement
         return jsonify({"error": "No selected file"}), 400
     
-    # Process the uploaded file
-    with rasterio.open(file) as src:
-        image = src.read()  # Read image data
-
-    # You might want to perform additional processing on the image here
-
-    # Return processed image info or confirmation
-    return jsonify({"status": "Image loaded successfully", "shape": image.shape})
+    try:
+        # Open and read the uploaded image using rasterio
+        print(f"Loading image: {file.filename}")  # Debug statement
+        with rasterio.open(file) as src:
+            image = src.read()  # Read image data
+            
+            # Convert the image to a format suitable for base64 encoding
+            image = Image.fromarray(image[0])  # Convert the first band to a PIL image
+            buffered = io.BytesIO()
+            image.save(buffered, format="PNG")  # Save as PNG
+            img_str = base64.b64encode(buffered.getvalue()).decode('utf-8')  # Convert to base64
+        
+        print("Image loaded successfully.")  # Debug statement
+        return jsonify({
+            "status": "Image loaded successfully",
+            "image": img_str  # Send back the base64 image
+        })
+    except Exception as e:
+        print(f"Error occurred: {str(e)}")  # Debug statement
+        return jsonify({"error": str(e)}), 500
 
 @app.route('/favicon.ico')
 def favicon():
