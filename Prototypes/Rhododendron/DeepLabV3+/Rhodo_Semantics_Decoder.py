@@ -15,6 +15,7 @@ import tifffile as tiff
 import tensorflow as tf
 from keras import optimizers
 from keras.layers import Input, Conv2D, GlobalAveragePooling2D, BatchNormalization, Activation, UpSampling2D, Reshape, Concatenate, Dropout
+
 from keras.models import Model
 from keras.applications import DenseNet121
 from keras.regularizers import l2
@@ -28,8 +29,9 @@ IMG_HEIGHT = 244
 IMG_WIDTH = 244
 IMG_CHANNELS = 6
 BATCH_SIZE = 8
-EPOCHS = 250
-LEARNING_RATE = 1e-3
+EPOCHS = 100
+LEARNING_RATE = 1e-2
+REGULARISATION = 0
 LOG_DIR = os.getenv('LOG_DIR', "./.logs/Rhodo-semantics-plus/" + datetime.datetime.now().strftime("%Y%m%d-%H%M%S"))
 
 data_dir = os.getenv('RHODODENDRON-DATASET')
@@ -51,6 +53,7 @@ def augment_image(image, mask):
         image = tf.image.random_contrast(image, lower=0.9, upper=1.1)
     if np.random.rand() > 0.5:
          image = tf.image.random_crop(image, size=[IMG_HEIGHT, IMG_WIDTH, IMG_CHANNELS])
+
     return image, mask
 
 def normalize_image(image):
@@ -197,14 +200,15 @@ def ASPP_module(x):
     # Global Average Pooling
     aspp5 = GlobalAveragePooling2D()(x)
     aspp5 = Reshape((1, 1, aspp5.shape[-1]))(aspp5)
-    aspp5 = Conv2D(256, (1, 1), padding='same', use_bias=False, kernel_regularizer=l2(0.001))(aspp5)
+    aspp5 = Conv2D(256, (1, 1), padding='same', use_bias=False, kernel_regularizer=l2(REGULARISATION))(aspp5)
     aspp5 = BatchNormalization()(aspp5)
     aspp5 = Activation('relu')(aspp5)
     aspp5 = UpSampling2D(size=(x.shape[1], x.shape[2]), interpolation='bilinear')(aspp5)
 
     # Concatenate ASPP outputs
     x = Concatenate(axis=-1)([aspp1, aspp2, aspp3, aspp4, aspp5])
-    x = Conv2D(256, (1, 1), padding='same', use_bias=False, kernel_regularizer=l2(0.001))(x)
+    x = Conv2D(256, (1, 1), padding='same', use_bias=False, kernel_regularizer=l2(REGULARISATION))(x)
+
     x = BatchNormalization()(x)
     x = Activation('relu')(x)
 
@@ -247,8 +251,8 @@ def DeepLabV3Plus(input_shape, num_classes=1):
     x = Conv2D(256, (3, 3), padding="same", use_bias=False)(x)
     x = BatchNormalization()(x)
     x = Activation("relu")(x)
-    
-    x = Dropout(0.1)(x)
+
+    x = Dropout(0.2)(x)
 
     # Final upsampling to the original image size
     final_upsample_size = (input_shape[0], input_shape[1])

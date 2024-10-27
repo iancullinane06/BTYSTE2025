@@ -81,3 +81,4 @@ def discriminative_loss(y_true, y_pred, delta_v=0.5, delta_d=1.5, alpha=1.0, bet
     # Total discriminative loss
     total_loss = alpha * var_loss + beta * dist_loss + gamma * reg_loss
     return total_loss
+    return dice_loss(y_true, y_pred) + tf.keras.losses.binary_crossentropy(y_true, y_pred)
