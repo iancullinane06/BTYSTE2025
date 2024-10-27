@@ -7,12 +7,16 @@ This is the repository for my project for BTYSTE (the BT Young Scientist & Techn
 
 - **Semantic Segmentation:**  
   - **Early Stages:**  
-    I experimented with semantic segmentation to perform statistical analysis on pixel values to identify tree species.  
-  - **Current Focus:**  
+    I experimented with semantic segmentation to perform statistical analysis on pixel values to identify tree species.
+    This involved using the ADE20k dataset to segment trees then to use an SVM on those values. It was a poor idea however and didnèt work well.
+    An instance segmentation model would have been necessary.
+  - **Later Stages:**  
     I am currently developing models to manipulate semantic segmentation for the identification of rhododendron in multispectral image scans.
+    I'm using semantic segmentation in the context of aerial images now nad producing masks that are inherently the plant it's trying to recognise.
 
 - **Classification with ResNet:**  
-  - I implemented ResNet models with 50 and 101 layers to classify whether a forest fire is present in an image. This work aims to enhance early detection and monitoring of forest fires.
+  - I implemented ResNet models with 50 and 101 layers to classify whether a forest fire is present in an image. This work aims to enhance early detection and monitoring of forest fires. My model had issues with overfitting but overall a rather comprehensive model.
+  I might try develop a semantic segmentation model for this next
 
 ## Datasets
 
@@ -27,11 +31,12 @@ The project is structured around two main components: semantic segmentation and 
 ### Semantic Segmentation
 
 - **Approach:**  
-  Using deep learning models to identify and segment specific regions in images based on pixel analysis.
+  Using deep learning models to identify and segment specific regions in images based on pixel analysis. This allows me to recognise different plants with ease and produce shapefiles that bound the regions I'm interested in.
 - **Tools:**  
   - Leveraging pre-trained models and fine-tuning them for the specific task of identifying rhododendrons in multispectral images.
   - Performing pixel-level statistical analysis to enhance model accuracy in species identification.
-
+  - DeepLabV3Plus for the model architecture.
+  - Leveraging the Tensorflow framework and Keras as a high level interface to train my models.
   
 
 ### Classification with ResNet
@@ -46,7 +51,6 @@ The project is structured around two main components: semantic segmentation and 
 Ensure you have these libraries installed. You can download them using `pip3`.
 
 - **OpenCV:** `opencv-python` for video processing
-- **MediaPipe:** `mediapipe` for image analysis of hand landmarks
 - **Pandas:** `pandas` for data manipulation
 - **NumPy:** `numpy` for numerical computations
 - **Scikit-Learn:** `sklearn` for building AI models
@@ -58,6 +62,13 @@ Ensure you have these libraries installed. You can download them using `pip3`.
 - **Keras:** `keras` as a high-level API for TensorFlow models
 - **Python Dotenv:** `python-dotenv` for managing environment variables
 - **Tifffile:** `tiffile` for handling TIFF files, especially useful for multispectral images
+- **TKinter** `tkinter` for building early UI's
+- **PyQt5** `PyQt5` for building later UI's
+- **Threading** `threading` for running tkinter window separate
+- **Rasterio** `rasterio` to load raster files
+- **GeoPandas** `geopandas` to handle shapefiles
+- **Shapely** `shapely` to save 
+- **Fiona** `fiona`
 
 ## Installation
 

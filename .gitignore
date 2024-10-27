@@ -13,7 +13,14 @@
 
 #Report
 .Report_Book
-Application
 
 # Python Cache files
 __pycache__/
+
+build
+
+Application/assets/Model/DLV3+-model.h5
+
+node_modules
+
+package-lock.json

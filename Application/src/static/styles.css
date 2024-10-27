@@ -1,0 +1,153 @@
+:root {
+    --bg-colour: #8a8a8a;          /* Background color */
+    --grey-colour: #ccc;           /* Grey color for inactive tabs */
+    --accent-colour: #3498db;      /* Your accent color */
+    --tab-active-colour: #eaeaea;  /* Active tab color */
+}
+
+body {
+    font-family: Arial, sans-serif;
+    background: rgb(34,145,195);
+    background: linear-gradient(135deg, var(--accent-colour) 0%, rgba(69,253,45,1) 100%);
+    margin: 0;
+    display: flex;
+    flex-direction: column;
+    height: 100vh;
+    padding: 10px;
+    overflow:hidden;
+}
+
+    .container {
+        display: flex;
+        justify-content: space-between;
+        flex: 1;
+    }
+        .left {
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+            margin-bottom: 3vh;
+            max-width: 100%;
+            margin: 2vh;
+        }
+            .left img {
+                height: 7vh;
+            }
+
+        .editing-box {
+            background-color: #ffffff;
+            box-shadow: 0 0 10px rgba(0, 0, 0, 0.1);
+            box-shadow: rgba(0, 0, 0, 0.56) 0px 22px 70px 4px;
+            border-top-left-radius: 30px 15px;
+            border-bottom-right-radius: 30px 15px;
+            height: 45vh;
+            overflow:hidden;
+        }
+
+            .tabs {
+                list-style-type: none;
+                padding: 0;
+                display: flex;
+                justify-content: space-evenly;
+                align-items: flex-start;
+                margin: 0;
+            }
+
+            .tablinks {
+                color: var(--accent-colour);
+                font-weight: 800;
+                background-color: var(--grey-colour);
+                text-shadow:1px 1px 10px var(--grey-colour), 1px 1px 10px var(--grey-colour);
+                border: 0px;
+                padding: 15px 15px;         /* Padding inside tabs */
+                cursor: pointer;
+                transition: all 0.3s ease;  /* Transition for smoothness */
+                width: 100%;
+                box-shadow: rgba(0, 0, 0, 0.25) 0px 0.0625em 0.0625em, rgba(0, 0, 0, 0.25) 0px 0.125em 0.5em, rgba(255, 255, 255, 0.1) 0px 0px 0px 1px inset;
+            }
+
+            .tablinks.active {
+                border-bottom: 1px solid transparent;   /* Make it appear below the content */
+                background-color: var(--tab-active-colour);
+                transform: scaley(1.20);                    /* Slightly grow selected tab */
+            }
+
+            .tablinks.selected {
+                background-color: var(--tab-active-colour); /* Background color for selected tab */
+                color: white;                               /* Text color for selected tab */
+            }
+
+            .tab-pane {
+                display: none;    /* Hide all tab content by default */
+                margin: 10px;
+            }
+
+            .tab-pane.active {
+                display: block;   /* Show active tab content */
+                border-bottom: 1px solid transparent;
+            }
+
+            .file-controls {
+                padding: 10px;
+                background-color: #007BFF;
+                color: white;
+                text-align: center;
+                position: relative;
+            }
+
+    .visual-box {
+        width: 70%;
+        background-color: #eaeaea;
+        margin-left: 5px;
+        padding:2vh;
+        position: relative;
+        max-height: 93vh;
+        border-bottom-left-radius: 5% 2%;
+        border-top-right-radius: 5% 2%;
+        box-shadow: rgba(50, 50, 93, 0.25) 0px 30px 60px -12px inset, rgba(0, 0, 0, 0.3) 0px 18px 36px -18px inset;
+    }
+
+button:not(.tablinks) {
+    align-items: center;
+    appearance: none;
+    background-color: #FCFCFD;
+    border-radius: 4px;
+    border-width: 0;
+    box-shadow: rgba(45, 35, 66, 0.4) 0 2px 4px,rgba(45, 35, 66, 0.3) 0 7px 13px -3px,#D6D6E7 0 -3px 0 inset;
+    box-sizing: border-box;
+    color: #36395A;
+    cursor: pointer;
+    display: inline-flex;
+    font-family: "JetBrains Mono",monospace;
+    height: 48px;
+    justify-content: center;
+    line-height: 1;
+    list-style: none;
+    overflow: hidden;
+    padding-left: 16px;
+    padding-right: 16px;
+    position: relative;
+    text-align: left;
+    text-decoration: none;
+    transition: box-shadow .15s,transform .15s;
+    user-select: none;
+    -webkit-user-select: none;
+    touch-action: manipulation;
+    white-space: nowrap;
+    will-change: box-shadow,transform;
+    font-size: 18px;
+}
+
+button:not(.tablinks):focus {
+    box-shadow: #D6D6E7 0 0 0 1.5px inset, rgba(45, 35, 66, 0.4) 0 2px 4px, rgba(45, 35, 66, 0.3) 0 7px 13px -3px, #D6D6E7 0 -3px 0 inset;
+}
+
+button:not(.tablinks):hover {
+    box-shadow: rgba(45, 35, 66, 0.4) 0 4px 8px, rgba(45, 35, 66, 0.3) 0 7px 13px -3px, #D6D6E7 0 -3px 0 inset;
+    transform: translateY(-2px);
+}
+
+button:not(.tablinks):active {
+    box-shadow: #D6D6E7 0 3px 7px inset;
+    transform: translateY(2px);
+}
