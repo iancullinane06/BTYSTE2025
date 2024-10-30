@@ -4,9 +4,7 @@ import sys
 # Go up two directories to get to the root directory (root_dir)
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', '..')))
 
-from EcoLytix.Packages.accuracy import *
-from EcoLytix.Packages.loss import *
-from EcoLytix.Functions.lrfinder import *
+from EcoLytix import *
 
 import numpy as np
 import matplotlib.pyplot as plt
@@ -307,10 +305,11 @@ model.compile(optimizer=optimizers.Adam(learning_rate=LEARNING_RATE),
             loss=combined_loss,
             metrics=[dice_coefficient, f2_score, pixel_accuracy, mean_iou])
 
-lr_finder(model, train_generator)
-    
+PEAK_LEARNING_RATE = lr_finder(model, train_generator)
+
 if __name__ == "__main__":
     callbacks = [
+        SetLearningRateCallback(peak_lr=PEAK_LEARNING_RATE),
         tf.keras.callbacks.EarlyStopping(monitor='val_loss', patience=30, restore_best_weights=True, verbose=1),
         tf.keras.callbacks.ReduceLROnPlateau(monitor='val_loss', factor=0.2, patience=15, min_lr=1e-6, verbose=1),
         tf.keras.callbacks.ModelCheckpoint(filepath=os.path.join(LOG_DIR, 'model.h5'), save_best_only=True),
