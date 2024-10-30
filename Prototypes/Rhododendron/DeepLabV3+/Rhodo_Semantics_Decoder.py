@@ -6,6 +6,7 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '.
 
 from EcoLytix.Packages.accuracy import *
 from EcoLytix.Packages.loss import *
+from EcoLytix.Functions.lrfinder import *
 
 import numpy as np
 import matplotlib.pyplot as plt
@@ -260,26 +261,24 @@ def DeepLabV3Plus(input_shape, num_classes=1):
     model = Model(inputs, outputs)
     return model
 
-# Create the model
-model = DeepLabV3Plus(input_shape=(IMG_HEIGHT, IMG_WIDTH, IMG_CHANNELS), num_classes=1)
+def train(model, callbacks):
+    """
+    Train the model.
+    """
+    # Callbacks for logging and checkpointing
+    log_dir = LOG_DIR
+    tensorboard_callback = tf.keras.callbacks.TensorBoard(log_dir=log_dir, histogram_freq=1)
+    checkpoint_callback = tf.keras.callbacks.ModelCheckpoint(
+        os.path.join(log_dir, 'model.h5'), save_best_only=True)
 
-model.compile(optimizer=optimizers.Adam(learning_rate=LEARNING_RATE),
-              loss=combined_loss,
-              metrics=[dice_coefficient, f2_score, pixel_accuracy, mean_iou])
+    history = model.fit(
+        train_generator,
+        validation_data=validation_generator,
+        epochs=EPOCHS,
+        callbacks=callbacks
+    )
 
-callbacks = [
-    tf.keras.callbacks.EarlyStopping(monitor='val_loss', patience=30, restore_best_weights=True, verbose=1),
-    tf.keras.callbacks.ReduceLROnPlateau(monitor='val_loss', factor=0.2, patience=15, min_lr=1e-6, verbose=1),
-    tf.keras.callbacks.ModelCheckpoint(filepath=os.path.join(LOG_DIR, 'model.h5'), save_best_only=True),
-    tf.keras.callbacks.TensorBoard(log_dir=LOG_DIR),
-]
-
-history = model.fit(
-    train_generator,
-    epochs=EPOCHS,
-    validation_data=validation_generator,
-    callbacks=callbacks
-)
+    return history
 
 def plot_history(history):
     plt.figure(figsize=(12, 4))
@@ -302,15 +301,32 @@ def plot_history(history):
 
     plt.show()
 
-plot_history(history)
+model = DeepLabV3Plus(input_shape=(IMG_HEIGHT, IMG_WIDTH, IMG_CHANNELS), num_classes=1)
 
-# Evaluate the model
-test_loss, test_dice_coefficient, test_f2_score, test_pixel_accuracy, test_mean_iou = model.evaluate(test_generator)
-print(f"Test Loss: {test_loss}")
-print(f"Test Dice Coefficient: {test_dice_coefficient}")
-print(f"Test F2 Score: {test_f2_score}")
-print(f"Test Pixel Accuracy: {test_pixel_accuracy}")
-print(f"Test Mean IoU: {test_mean_iou}")
+model.compile(optimizer=optimizers.Adam(learning_rate=LEARNING_RATE),
+            loss=combined_loss,
+            metrics=[dice_coefficient, f2_score, pixel_accuracy, mean_iou])
 
-# Save the model
-model.save('DLV3+-model.h5')
+lr_finder(model, train_generator)
+    
+if __name__ == "__main__":
+    callbacks = [
+        tf.keras.callbacks.EarlyStopping(monitor='val_loss', patience=30, restore_best_weights=True, verbose=1),
+        tf.keras.callbacks.ReduceLROnPlateau(monitor='val_loss', factor=0.2, patience=15, min_lr=1e-6, verbose=1),
+        tf.keras.callbacks.ModelCheckpoint(filepath=os.path.join(LOG_DIR, 'model.h5'), save_best_only=True),
+        tf.keras.callbacks.TensorBoard(log_dir=LOG_DIR),
+    ]
+    
+    history = train(model, callbacks)
+    plot_history(history)
+
+    # Evaluate the model
+    test_loss, test_dice_coefficient, test_f2_score, test_pixel_accuracy, test_mean_iou = model.evaluate(test_generator)
+    print(f"Test Loss: {test_loss}")
+    print(f"Test Dice Coefficient: {test_dice_coefficient}")
+    print(f"Test F2 Score: {test_f2_score}")
+    print(f"Test Pixel Accuracy: {test_pixel_accuracy}")
+    print(f"Test Mean IoU: {test_mean_iou}")
+
+    # Save the model
+    model.save('DLV3+-model.h5')
